@@ -288,6 +288,7 @@ function renderDetail(slug) {
   const e10 = r.econ['10000'];
   const beta = T.clock.beta, bAge = r.age_days ?? UNKNOWN_AGE, bx = clockFeats(r.tvl_usd, bAge, r.chains.length);
   const bF0 = clockF(beta, r.tvl_usd, bAge, r.chains.length), bF1 = clockF(beta, r.tvl_usd, bAge + 365, r.chains.length), bHz = hazard12(beta, r.tvl_usd, bAge, r.chains.length);
+  const bZ = beta[0] + beta[1] * bx[0] + beta[2] * bx[1] + beta[3] * bx[2], pct2 = (v) => (v * 100).toFixed(2) + '%';
   const gmExact = impliedOf(r, { kind: T.model.kind, a: T.model.a, b: T.model.b, g: T.model.growthCoef, s: T.model.seasonCoef, family: T.model.family }).gm;
   const contrib = (v) => `${v >= 0 ? '+' : '−'}${fmtN(Math.abs(v))}`;
   const signed$ = (v) => `${v >= 0 ? '+' : '−'}$${fmtN(Math.abs(v))}`;
@@ -301,7 +302,7 @@ function renderDetail(slug) {
     </div>
     <div class="totals-h">How the two headline numbers are built</div><div class="buildup" id="buildup">
       <div class="bu-row"><span class="bu-cap">Stage 1 — value</span>TVL <b>${fmt$(r.tvl_usd)}</b> → size curve <b>${fmt$(f.curve_value_usd)}</b> → × growth tilt <b>${gmExact.toFixed(4)}</b> (7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'}, log tilt) → <b>implied value ${fmt$(r.implied_value_usd)}</b> · band P10 ${fmt$(band[0])} – P90 ${fmt$(band[3])}</div>
-      <div class="bu-row"><span class="bu-cap">Stage 2 — clock</span>drivers, logit points: size <b>${contrib(beta[1] * bx[0])}</b> · age <b>${contrib(beta[2] * bx[1])}</b> · chains <b>${contrib(beta[3] * bx[2])}</b> · base <b>${contrib(beta[0])}</b> → F(today) <b>${Math.round(bF0 * 100)}%</b> → F(+1y) <b>${Math.round(bF1 * 100)}%</b> → <b>launch rate (${Math.round(bF1 * 100)}% − ${Math.round(bF0 * 100)}%) / (1 − ${Math.round(bF0 * 100)}%) = ${Math.round(bHz * 100)}% / yr</b></div>
+      <div class="bu-row"><span class="bu-cap">Stage 2 — clock</span>drivers, logit points: size <b>${contrib(beta[1] * bx[0])}</b> · age <b>${contrib(beta[2] * bx[1])}</b> · chains <b>${contrib(beta[3] * bx[2])}</b> · base <b>${contrib(beta[0])}</b> → logit <b>${contrib(bZ)}</b> → F(today) <b>${pct2(bF0)}</b> → F(+1y) <b>${pct2(bF1)}</b> → <b>launch rate (${pct2(bF1)} − ${pct2(bF0)}) / (1 − ${pct2(bF0)}) = ${(bHz * 100).toFixed(1)}% / yr</b></div>
       <div class="bu-row"><span class="bu-cap">Snapshot record</span>listed <b>${esc(r.listed_at ?? 'null')}</b> · tracked <b>${r.age_days === null ? '—' : r.age_days + 'd'}</b> · chains <b>${esc(r.chains.slice(0, 3).join(', ') || 'none listed')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''}</b> · status: <b>no token recorded</b> (gecko_id and symbol both null)</div>
     </div>
     <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at the $10,000 size</h2><ol class="steps">

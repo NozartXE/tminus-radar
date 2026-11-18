@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T-Minus — token launch radar</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><h1 class="brand-mark">T-MINUS</h1><span class="brand-sub">token launch radar</span></div>
+  <div class="top-meta"><span id="asof"></span><span id="chip" class="chip chip-pending">re-running the fits…</span></div>
+</header>
+<main id="app">
+  <div id="boot" class="boot">Reading the snapshot and fitting the two stages…</div>
+  <div id="fatal" class="fatal" hidden></div>
+  <section id="view-board" hidden>
+    <div class="hero">
+      <div class="panel panel-fit">
+        <h2>Stage one — what the launch is worth</h2>
+        <canvas id="fitChart" height="150"></canvas>
+        <p id="fitStats" class="stats"></p>
+      </div>
+      <div class="panel panel-clock">
+        <h2>Stage two — the launch clock</h2>
+        <canvas id="clockChart" height="150"></canvas>
+        <p id="clockStats" class="stats"></p>
+      </div>
+      <div class="panel panel-abl">
+        <h2>Model ablation — leave-one-out on the 92 traded comps</h2>
+        <table id="ablTable" class="abl"></table>
+        <p id="boardCounts" class="stats"></p>
+      </div>
+    </div>
+    <nav class="toolbar" aria-label="Board controls">
+      <input id="q" type="search" placeholder="Search protocols…" aria-label="Search protocols">
+      <div class="chips" id="segChips" role="group" aria-label="Segment"></div>
+      <div class="chips" id="verChips" role="group" aria-label="Verdict"></div>
+      <select id="famSel" aria-label="Category"></select>
+      <select id="chainSel" aria-label="Chain"></select>
+      <div class="chips" id="depChips" role="group" aria-label="Deposit size"></div>
+    </nav>
+    <div id="farmbook" class="farmbook" hidden></div>
+    <div class="tablewrap">
+      <table class="board" id="boardTable">
+        <thead><tr>
+          <th data-k="rank">#</th><th data-k="name" class="left">Protocol</th><th data-k="tvl">TVL</th>
+          <th data-k="chg">7d</th><th data-k="age">Age</th><th data-k="hz">Launch / yr</th>
+          <th data-k="val">Implied value</th><th>Band P10–P90</th><th data-k="range">Rank range</th>
+          <th data-k="expnet">Expected net</th><th data-k="verdict">Verdict</th>
+        </tr></thead>
+        <tbody id="boardBody"></tbody>
+      </table>
+      <div id="empty" class="empty" hidden>No protocol matches these filters. <button id="resetBtn" type="button">Reset the filters</button></div>
+    </div>
+    <section class="method panel">
+      <h2>How T-Minus works</h2>
+      <div id="methodText" class="method-grid"></div>
+    </section>
+  </section>
+  <section id="view-detail" hidden></section>
+  <section id="view-list" hidden></section>
+</main>
+<footer class="foot"><span id="footNote"></span></footer>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

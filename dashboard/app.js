@@ -179,8 +179,8 @@ function filtered() {
 }
 function bandGlyph(r) {
   const lo = Math.log10(r.band[0]), hi = Math.log10(r.band[3]), span = Math.max(hi - lo, 1e-9);
-  const px = (v) => ((Math.log10(v) - lo) / span * 96).toFixed(1);
-  return `<span class="bandg" title="P10 ${fmt$(r.band[0])} · P25 ${fmt$(r.band[1])} · P75 ${fmt$(r.band[2])} · P90 ${fmt$(r.band[3])}"><span class="w" style="left:0;width:96px"></span><span class="b" style="left:${px(r.band[1])}px;width:${Math.max(2, px(r.band[2]) - px(r.band[1]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span><span class="bandnums">P10 ${fmt$(r.band[0])} · P90 ${fmt$(r.band[3])}</span>`;
+  const px = (v) => ((Math.log10(v) - lo) / span * 76).toFixed(1);
+  return `<span class="bandg" title="P10 ${fmt$(r.band[0])} · P25 ${fmt$(r.band[1])} · P75 ${fmt$(r.band[2])} · P90 ${fmt$(r.band[3])}"><span class="w" style="left:0;width:76px"></span><span class="b" style="left:${px(r.band[1])}px;width:${Math.max(2, px(r.band[2]) - px(r.band[1]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span><span class="bandnums">P10 ${fmt$(r.band[0])}<br>P90 ${fmt$(r.band[3])}</span>`;
 }
 function renderBoard() {
   const rows = filtered(), dep = String(state.dep);

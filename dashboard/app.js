@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt$ = (v) => v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? '$' + (v / 1e3).toFixed(1) + 'K' : '$' + Math.round(v);
 const fmtN = (v, d = 2) => (v < 0 ? '-' : '') + Math.abs(v).toFixed(d);
+const fmtDec = (logv) => { const v = 10 ** logv; return v >= 1e9 ? '$' + (v / 1e9) + 'B' : v >= 1e6 ? '$' + (v / 1e6) + 'M' : '$' + (v / 1e3) + 'K'; };
 
 /* ---------- the model, mirrored from lib/model.ts ---------- */
 const UNKNOWN_AGE = 365;
@@ -118,7 +119,7 @@ function filtered() {
 function bandGlyph(r) {
   const lo = Math.log10(r.band[0]), hi = Math.log10(r.band[3]), span = Math.max(hi - lo, 1e-9);
   const px = (v) => ((Math.log10(v) - lo) / span * 96).toFixed(1);
-  return `<span class="bandg"><span class="w" style="left:0;width:96px"></span><span class="b" style="left:${px(r.band[1])}px;width:${Math.max(2, px(r.band[2]) - px(r.band[1]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span>`;
+  return `<span class="bandg" title="P10 ${fmt$(r.band[0])} · P25 ${fmt$(r.band[1])} · P75 ${fmt$(r.band[2])} · P90 ${fmt$(r.band[3])}"><span class="w" style="left:0;width:96px"></span><span class="b" style="left:${px(r.band[1])}px;width:${Math.max(2, px(r.band[2]) - px(r.band[1]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span><span class="bandnums">P10 ${fmt$(r.band[0])} · P90 ${fmt$(r.band[3])}</span>`;
 }
 function renderBoard() {
   const rows = filtered(), dep = String(state.dep);
@@ -127,7 +128,7 @@ function renderBoard() {
     <td class="left"><a class="pname" href="#/p/${esc(r.slug)}">${esc(r.name)}</a><br><span class="psub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.slice(0, 2).join(', ') || '—')}${r.watchlist ? ' · watchlist' : ''}</span></td>
     <td>${fmt$(r.tvl_usd)}</td><td>${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'}</td>
     <td>${r.age_days === null ? '—' : r.age_days >= 365 ? (r.age_days / 365).toFixed(1) + 'y' : r.age_days + 'd'}</td>
-    <td><span class="hzbar"><i style="width:${Math.min(100, r.clock.hazard12 * 220)}%"></i></span>${Math.round(r.clock.hazard12 * 100)}%</td>
+    <td><span class="hzbar" title="launch rate over the next 12 months, from the clock"><i style="width:${Math.min(100, r.clock.hazard12 * 220)}%"></i></span>${Math.round(r.clock.hazard12 * 100)}%</td>
     <td><b>${fmt$(r.implied_value_usd)}</b></td><td>${bandGlyph(r)}</td>
     <td>${r.rank_range[0]}–${r.rank_range[1]}</td>
     <td class="${e.expected_net >= 0 ? 'pos' : 'neg'}">${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net))}</td>
@@ -144,25 +145,45 @@ function renderBoard() {
   } else fb.hidden = true;
 }
 function drawFit() {
-  const cv = $('fitChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 150;
+  const cv = $('fitChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 180;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
   const sc = T.validation.scatter, xs = sc.comps.map(p => p[0]), ys = sc.comps.map(p => p[1]);
   const x0 = Math.min(...xs) - .2, x1 = Math.max(...xs) + .2, y0 = Math.min(...ys) - .2, y1 = Math.max(...ys) + .2;
-  const X = (v) => (v - x0) / (x1 - x0) * (W - 8) + 4, Y = (v) => H - 6 - (v - y0) / (y1 - y0) * (H - 12);
-  g.strokeStyle = '#2C3A4D'; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+  // axes first: faint gridlines and labelled decade ticks on both log scales,
+  // so the plot reads on its own — market cap against TVL, in dollars.
+  const L = 48, R = 10, Tp = 8, B = 32, pw = W - L - R, ph = H - Tp - B;
+  const X = (v) => L + (v - x0) / (x1 - x0) * pw, Y = (v) => Tp + ph - (v - y0) / (y1 - y0) * ph;
+  g.font = '10.5px sans-serif';
+  g.strokeStyle = '#232F42'; g.fillStyle = '#A9B8C8'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (let d = Math.ceil(y0); d <= Math.floor(y1); d++) { const y = Y(d); g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(fmtDec(d), L - 6, y); }
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let d = Math.ceil(x0); d <= Math.floor(x1); d++) g.fillText(fmtDec(d), X(d), Tp + ph + 5);
+  g.strokeStyle = '#2C3A4D'; g.strokeRect(L + .5, Tp + .5, pw - 1, ph - 1);
   g.fillStyle = '#35C4B5'; for (const [x, y] of sc.comps) { g.fillRect(X(x) - 1.5, Y(y) - 1.5, 3, 3); }
   g.strokeStyle = '#7E90A5'; g.setLineDash([4, 3]); g.beginPath(); sc.band.forEach(([x, , hi], i) => i ? g.lineTo(X(x), Y(hi)) : g.moveTo(X(x), Y(hi))); g.stroke();
   g.beginPath(); sc.band.forEach(([x, lo], i) => i ? g.lineTo(X(x), Y(lo)) : g.moveTo(X(x), Y(lo))); g.stroke(); g.setLineDash([]);
   g.strokeStyle = '#F0A832'; g.lineWidth = 2; g.beginPath(); sc.curve.forEach(([x, y], i) => i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))); g.stroke();
+  g.fillStyle = '#8CA0B5'; g.save(); g.translate(11, Tp + ph / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('market cap (log $)', 0, 0); g.restore();
+  g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText('TVL (log $)', L + pw / 2, H - 2);
 }
 function drawClock() {
-  const cv = $('clockChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 150;
+  const cv = $('clockChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 180;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
-  const pts = T.clock.curve, X = (a) => 4 + Math.log10(a / 90) / Math.log10(2555 / 90) * (W - 8), Y = (v) => H - 6 - v * (H - 12);
-  g.strokeStyle = '#2C3A4D'; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+  const pts = T.clock.curve;
+  // axes first: percent ticks up the side, labelled ages along the log time axis.
+  const L = 46, R = 10, Tp = 8, B = 32, pw = W - L - R, ph = H - Tp - B;
+  const X = (a) => L + Math.log10(a / 90) / Math.log10(2555 / 90) * pw, Y = (v) => Tp + ph - v * ph;
+  g.font = '10.5px sans-serif';
+  g.strokeStyle = '#232F42'; g.fillStyle = '#A9B8C8'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const t of [0, .25, .5, .75, 1]) { const y = Y(t); g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(Math.round(t * 100) + '%', L - 6, y); }
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (const [a, lab] of [[90, '3 mo'], [180, '6 mo'], [365, '1 y'], [730, '2 y'], [1460, '4 y'], [2555, '7 y']]) g.fillText(lab, X(a), Tp + ph + 5);
+  g.strokeStyle = '#2C3A4D'; g.strokeRect(L + .5, Tp + .5, pw - 1, ph - 1);
   g.strokeStyle = '#F0A832'; g.lineWidth = 2; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p.age), Y(p.f)) : g.moveTo(X(p.age), Y(p.f))); g.stroke();
   g.strokeStyle = '#35C4B5'; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p.age), Y(p.hazard)) : g.moveTo(X(p.age), Y(p.hazard))); g.stroke();
-  g.fillStyle = '#A9B8C8'; g.font = '10.5px sans-serif'; g.fillText('amber: launched-by-age share · teal: launch rate, next 12 months', 8, 14);
+  g.fillStyle = '#A9B8C8'; g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText('amber: launched-by-age share · teal: launch rate / yr', L + 6, Tp + 5);
+  g.fillStyle = '#8CA0B5'; g.save(); g.translate(11, Tp + ph / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('share of lookalikes', 0, 0); g.restore();
+  g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText('tracking age (log scale)', L + pw / 2, H - 2);
 }
 function renderHero() {
   const v = T.validation, c = T.clock;

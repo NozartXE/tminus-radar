@@ -61,7 +61,7 @@ const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 function farmEcon(p, value, age, dep, hz) {
   const weeks = weeksFor(age), gas = GAS[chainClass(p)], slice = T.farm.airdrop_share * value * dep / (dep + p.tvl_usd), costs = gas.setup + gas.weekly * weeks + gas.claim, forgone = YB.has(p.category ?? '') ? 0 : round2(dep * T.farm.forgone_apr * weeks / 52), hours = (T.farm.minutes.setup + T.farm.minutes.weekly * weeks + T.farm.minutes.claim) / 60, breakeven = slice > 0 ? (costs + forgone) / slice : Infinity, expSlice = hz * slice, expNet = expSlice - costs - forgone, expHr = expNet / hours;
   const verdict = expNet > 0 && expHr >= T.farm.worth_hour_floor ? 'Worth farming' : expNet > 0 || breakeven <= 2 * hz ? 'Marginal' : 'Skip';
-  return { slice, costs, forgone, hours, breakeven, expNet, verdict };
+  return { slice, costs, forgone, hours, breakeven, expSlice, expNet, expHr, verdict };
 }
 
 /* ---------- evidence: the headline numbers, re-derived from the shipped data ---------- */
@@ -147,7 +147,11 @@ function verify() {
     const range = [nearRank(rr.get(p.slug) ?? [], .1), nearRank(rr.get(p.slug) ?? [], .9)];
     if (JSON.stringify(range) !== JSON.stringify(p.rank_range)) { bad = 'rank range: ' + p.slug; break; }
     const hz = hazard12(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
-    for (const dep of [1000, 10000]) { const e = farmEcon(p, v, p.age_days, dep, hz); if (e.verdict !== p.econ[String(dep)].verdict || round2(e.expNet) !== p.econ[String(dep)].expected_net) { bad = 'verdict: ' + p.slug; break; } }
+    // every econ field is compared, not just the verdict: the detail totals
+    // strip prints slice, expected slice, costs, forgone, hours, break-even
+    // and expected net per hour straight from this block.
+    for (const dep of [1000, 10000]) { const e = farmEcon(p, v, p.age_days, dep, hz), s = p.econ[String(dep)];
+      if (e.verdict !== s.verdict || round2(e.expNet) !== s.expected_net || round2(e.expSlice) !== s.expected_slice || round2(e.slice) !== s.slice || round2(e.costs) !== s.costs || e.forgone !== s.forgone || Math.abs(e.hours - s.hours) > 1e-9 || round2(e.expHr) !== s.expected_net_hour || (s.breakeven === null ? isFinite(e.breakeven) : Math.abs(e.breakeven - s.breakeven) > 1e-4)) { bad = 'verdict: ' + p.slug; break; } }
     if (bad) break;
   }
   // evidence layer: the clock ablation must reproduce the shipped out-of-sample
@@ -159,7 +163,7 @@ function verify() {
   if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
   const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
   if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
-  else { chip.textContent = `board.json = this page: ${rows.length}/${rows.length} ranks, values, bands, ranges, verdicts, funnel and ablations re-run here in ${secs}s`; chip.className = 'chip chip-ok'; }
+  else { chip.textContent = `board.json = this page: ${rows.length}/${rows.length} ranks, values, bands, ranges, verdicts, plan totals, funnel and ablations re-run here in ${secs}s`; chip.className = 'chip chip-ok'; }
 }
 
 /* ---------- board UI ---------- */
@@ -268,10 +272,16 @@ function renderDetail(slug) {
   const f = r.model, band = r.band;
   const factor = (cap, val) => `<div class="factor"><div class="cap">${cap}</div><div class="val">${val}</div></div>`;
   const depRow = (dep) => { const e = r.econ[String(dep)]; return `<tr><td>$${dep.toLocaleString()}</td><td>${fmt$(e.slice)}</td><td>${fmt$(e.expected_slice)}</td><td>${fmt$(e.costs)}</td><td>${fmt$(e.forgone)}</td><td class="${e.expected_net >= 0 ? 'pos' : 'neg'}">${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net))}</td><td>${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net_hour))}</td><td>${e.breakeven === null || !isFinite(e.breakeven) ? '—' : Math.round(e.breakeven * 100) + '%'}</td><td><span class="verdict ${vClass(e.verdict)}">${esc(e.verdict)}</span></td></tr>`; };
+  const e10 = r.econ['10000'];
+  const signed$ = (v) => `${v >= 0 ? '+' : '−'}$${fmtN(Math.abs(v))}`;
+  const tile = (val, cap, sub, cls) => `<div class="stat"><div class="v${cls ? ' ' + cls : ''}">${val}</div><div class="cap">${cap}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
   $('view-detail').innerHTML = `
     <a class="backlink" href="#/">← Back to the board</a>
     <div class="d-head"><div><h1>${esc(r.name)}</h1><div class="sub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.join(', ') || 'no chain listed')} · TVL ${fmt$(r.tvl_usd)} · 7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'} · rank #${r.rank} (range ${r.rank_range[0]}–${r.rank_range[1]})${r.watchlist ? ' · on the watchlist' : ''}</div></div>
     <div class="d-big"><div><div class="cap">implied value if it launched at this record</div><div class="v">${fmt$(r.implied_value_usd)}</div></div><div><div class="cap">launch rate, next 12 months</div><div class="h">${Math.round(r.clock.hazard12 * 100)}% / yr</div></div></div></div>
+    <div class="totals-h">The farm at the $10,000 size — totals</div><div class="totals" id="totalsStrip">
+      ${tile(fmt$(e10.slice), 'Slice if launch')}${tile(fmt$(e10.expected_slice), 'Expected slice', `${Math.round(r.clock.hazard12 * 100)}% launch rate`)}${tile(fmt$(e10.costs), 'Fees and gas')}${tile(fmt$(e10.forgone), 'Yield forgone')}${tile(e10.hours.toFixed(1) + 'h', 'Your time', `over ${e10.weeks} weeks`)}${tile(signed$(e10.expected_net), 'Expected net', signed$(e10.expected_net_hour) + '/h', e10.expected_net >= 0 ? 'pos' : 'neg')}${tile(e10.breakeven === null || !isFinite(e10.breakeven) ? '—' : Math.round(e10.breakeven * 100) + '%', 'Break-even launch rate')}${tile(esc(e10.verdict), 'Verdict', '', vClass(e10.verdict))}
+    </div>
     <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at the $10,000 size</h2><ol class="steps">
       ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>
     <div class="d-grid">

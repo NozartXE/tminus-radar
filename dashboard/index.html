@@ -15,21 +15,38 @@
   <div id="boot" class="boot">Reading the snapshot and fitting the two stages…</div>
   <div id="fatal" class="fatal" hidden></div>
   <section id="view-board" hidden>
+    <section class="statstrip" id="statStrip" aria-label="Headline numbers"></section>
     <div class="hero">
       <div class="panel panel-fit">
         <h2>Stage one — what the launch is worth</h2>
-        <canvas id="fitChart" height="180"></canvas>
+        <canvas id="fitChart" height="160"></canvas>
         <p id="fitStats" class="stats"></p>
       </div>
       <div class="panel panel-clock">
         <h2>Stage two — the launch clock</h2>
-        <canvas id="clockChart" height="180"></canvas>
+        <canvas id="clockChart" height="160"></canvas>
         <p id="clockStats" class="stats"></p>
       </div>
       <div class="panel panel-abl">
         <h2>Model ablation — leave-one-out on the 92 traded comps</h2>
         <table id="ablTable" class="abl"></table>
         <p id="boardCounts" class="stats"></p>
+      </div>
+    </div>
+    <div class="evidence">
+      <div class="panel">
+        <h2>Where every protocol goes</h2>
+        <table id="funnelTable" class="abl"></table>
+        <p id="funnelNote" class="stats"></p>
+      </div>
+      <div class="panel">
+        <h2>Clock ablation — out-of-sample, 10-fold</h2>
+        <table id="abl2Table" class="abl"></table>
+        <p id="abl2Note" class="stats"></p>
+      </div>
+      <div class="panel">
+        <h2>What this board gets wrong — printed on purpose</h2>
+        <ul id="critList" class="crit"></ul>
       </div>
     </div>
     <nav class="toolbar" aria-label="Board controls">

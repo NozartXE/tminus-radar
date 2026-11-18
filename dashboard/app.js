@@ -64,6 +64,60 @@ function farmEcon(p, value, age, dep, hz) {
   return { slice, costs, forgone, hours, breakeven, expNet, verdict };
 }
 
+/* ---------- evidence: the headline numbers, re-derived from the shipped data ---------- */
+function aucScore(y, s) { const order = s.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v || a.i - b.i), r = new Array(s.length).fill(0); let i = 0; while (i < order.length) { let j = i; while (j + 1 < order.length && order[j + 1].v === order[i].v) j++; const avg = (i + 1 + j + 1) / 2; for (let t = i; t <= j; t++) r[order[t].i] = avg; i = j + 1; } let pos = 0, neg = 0, sumPos = 0; y.forEach((v, idx) => { if (v === 1) { pos++; sumPos += r[idx]; } else neg++; }); return pos && neg ? (sumPos - pos * (pos + 1) / 2) / (pos * neg) : 0; }
+function clockCV(rows) { const rng = mulberry(0xC10C), idx = rows.map((_, i) => i); for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = idx[i]; idx[i] = idx[j]; idx[j] = t; } const pred = new Array(rows.length).fill(0); for (let f = 0; f < 10; f++) { const test = new Set(idx.filter((_, i) => i % 10 === f)), beta = fitClock(rows.filter((_, i) => !test.has(i))); rows.forEach((r, i) => { if (test.has(i)) pred[i] = 1 / (1 + Math.exp(-r.x.reduce((s, v, j) => s + beta[j + 1] * v, beta[0]))); }); } const y = rows.map(r => r.y); return { auc: aucScore(y, pred), brier: y.reduce((s, v, i) => s + (v - pred[i]) ** 2, 0) / y.length }; }
+function evidence() {
+  const comps = T.raw.comps, kind = T.model.kind;
+  const vc = (dep) => { const o = { 'Worth farming': 0, Marginal: 0, Skip: 0 }; for (const r of T.rows) o[r.econ[String(dep)].verdict]++; return o; };
+  const crows = T.raw.clock.map(r => ({ x: clockFeats(r.tvl_usd, r.age_days ?? UNKNOWN_AGE, r.chains), y: r.launched }));
+  const sub = (keep) => crows.map(r => ({ x: keep.map(i => r.x[i]), y: r.y }));
+  const abl2 = [['size + age + chain count', [0, 1, 2], true], ['without chain count', [0, 1], false], ['without size', [1, 2], false], ['without age', [0, 2], false]].map(([label, keep, adopted]) => ({ label, adopted, ...clockCV(sub(keep)) }));
+  abl2.push({ label: 'base rate only', adopted: false, auc: 0.5, brier: T.clock.base_brier });
+  const pct = (v, q) => { const a = [...v].sort((x, y) => x - y); return a.length ? a[Math.max(0, Math.ceil(q * a.length) - 1)] : 0; };
+  const qsf = (v) => [.1, .25, .75, .9].map(q => Math.max(-1, Math.min(1, pct(v, q))));
+  const res = [], buckets = new Map();
+  for (let i = 0; i < comps.length; i++) { const f = fitForm(comps.filter((_, j) => j !== i), kind), r = Math.log10(comps[i].mcap_usd) - f.predict(comps[i]), key = Math.floor(Math.log10(comps[i].tvl_usd)); res.push(r); buckets.set(key, [...(buckets.get(key) ?? []), r]); }
+  const gq = qsf(res), bq = new Map([...buckets].filter(([, v]) => v.length >= 8).map(([k, v]) => [k, qsf(v)]));
+  let mid = 0, wide = 0;
+  comps.forEach((p, i) => { const q = bq.get(Math.floor(Math.log10(p.tvl_usd))) ?? gq; if (res[i] >= q[1] && res[i] <= q[2]) mid++; if (res[i] >= q[0] && res[i] <= q[3]) wide++; });
+  const abl1 = Object.fromEntries(T.validation.ablation.map(a => [a.variant, a.medianMiss]));
+  return { vc10: vc(10000), vc1: vc(1000), abl2, gq, covMid: mid / comps.length, covWide: wide / comps.length, tiltGap: abl1.growth - abl1.loggrowth };
+}
+let EV = null;
+function renderEvidence() {
+  const ev = EV, c = T.counts, v = T.validation, ck = T.clock;
+  const stat = (val, cap, sub, cls = '') => `<div class="stat"><div class="v ${cls}">${val}</div><div class="cap">${cap}</div><div class="sub">${sub}</div></div>`;
+  $('statStrip').innerHTML =
+    stat(c.protocols, 'protocols tracked', 'every one accounted for below') +
+    stat(c.ranked, 'ranked pre-token', `${c.above_floor} above the floor · ${c.watchlist} watchlist`) +
+    stat(v.comps, 'comps in the fit', `of ${c.traded} already trading`, 'teal') +
+    stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat multiple ×${v.flatMedianMiss.toFixed(2)}`, 'teal') +
+    stat(ck.cv_auc.toFixed(2), 'stage-2 AUC · OOS', `${ck.population} protocols · 10-fold`, 'amber') +
+    stat(ck.cv_brier.toFixed(3), 'stage-2 Brier', `${((ck.base_brier - ck.cv_brier) / ck.base_brier * 100).toFixed(1)}% under the ${ck.base_brier.toFixed(3)} base rate`, 'amber');
+  const fr = (label, n, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${n}</td></tr>`;
+  $('funnelTable').innerHTML = '<tr><th>Disposition</th><th>Count</th></tr>' +
+    fr('in the snapshot', c.protocols) +
+    fr('already record a token — comps, never ranked', c.traded) +
+    fr('set aside by rule, each with its reason', c.aside) +
+    fr('ranked pre-token — the board below', c.ranked, 'sum') +
+    fr('worth farming at $10K', ev.vc10['Worth farming']) +
+    fr('marginal at $10K', ev.vc10.Marginal) +
+    fr('skip at $10K', ev.vc10.Skip) +
+    fr('worth farming at $1K', ev.vc1['Worth farming']);
+  const reasons = {}; for (const a of T.aside) reasons[a.reason] = (reasons[a.reason] ?? 0) + 1;
+  $('funnelNote').innerHTML = `Set aside: ${Object.entries(reasons).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}.`;
+  $('abl2Table').innerHTML = '<tr><th>Clock form</th><th>CV AUC</th><th>CV Brier</th></tr>' + ev.abl2.map(a => `<tr class="${a.adopted ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.auc.toFixed(3)}</td><td>${a.brier.toFixed(3)}</td></tr>`).join('');
+  $('abl2Note').innerHTML = `Same seeded 10 folds as the headline scores, refit here on the shipped rows. Age carries the clock; chain count does not — see the critique.`;
+  $('critList').innerHTML = [
+    `Out-of-sample, the P25–P75 band holds <b>${Math.round(ev.covMid * 100)}%</b> of traded comps (calibrated: 50%) and P10–P90 holds <b>${Math.round(ev.covWide * 100)}%</b>, not 80% — read the outer band as a 3-in-4 range.`,
+    `The adopted log-growth tilt beats the linear tilt by <b>${ev.tiltGap.toFixed(2)}×</b> of median miss — inside noise. It is kept for symmetry, not sharpness.`,
+    `The clock's chain-count term does not pay out-of-sample (dropping it: AUC <b>${ev.abl2[1].auc.toFixed(3)}</b> vs <b>${ck.cv_auc.toFixed(3)}</b>), and its Brier edge over the base rate is only <b>${(ck.base_brier - ck.cv_brier).toFixed(3)}</b> — it ranks better than it times.`,
+    `Verdicts are hostage to deposit size: <b>${ev.vc10['Worth farming']}</b> of ${c.ranked} plans are worth farming at $10K, only <b>${ev.vc1['Worth farming']}</b> at $1K. Gas and forgone yield, not the model, kill the small farms.`,
+    `One snapshot (${esc(T.as_of)}): TVL and 7-day change are single readings, and the clock's ages are tracking ages, not founding dates.`,
+  ].map(t => `<li>${t}</li>`).join('');
+}
+
 /* ---------- verification: refit both stages, rebuild every row ---------- */
 function verify() {
   const t0 = performance.now(), comps = T.raw.comps, rows = T.rows;
@@ -96,9 +150,16 @@ function verify() {
     for (const dep of [1000, 10000]) { const e = farmEcon(p, v, p.age_days, dep, hz); if (e.verdict !== p.econ[String(dep)].verdict || round2(e.expNet) !== p.econ[String(dep)].expected_net) { bad = 'verdict: ' + p.slug; break; } }
     if (bad) break;
   }
+  // evidence layer: the clock ablation must reproduce the shipped out-of-sample
+  // scores, the band quantiles the shipped band table, and the rendered numbers
+  // the recomputation — anything printed on the first screen is checked here.
+  const ev2 = evidence();
+  if (!bad && (Math.abs(ev2.abl2[0].auc - T.clock.cv_auc) > 5e-4 || Math.abs(ev2.abl2[0].brier - T.clock.cv_brier) > 5e-4)) bad = 'clock ablation';
+  if (!bad && JSON.stringify(ev2.gq.map(x => +x.toFixed(6))) !== JSON.stringify(T.band_table.global.map(x => +x.toFixed(6)))) bad = 'band table';
+  if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
   const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
   if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
-  else { chip.textContent = `board.json = this page: ${rows.length}/${rows.length} ranks, values, bands, ranges and verdicts re-run here in ${secs}s`; chip.className = 'chip chip-ok'; }
+  else { chip.textContent = `board.json = this page: ${rows.length}/${rows.length} ranks, values, bands, ranges, verdicts, funnel and ablations re-run here in ${secs}s`; chip.className = 'chip chip-ok'; }
 }
 
 /* ---------- board UI ---------- */
@@ -145,7 +206,7 @@ function renderBoard() {
   } else fb.hidden = true;
 }
 function drawFit() {
-  const cv = $('fitChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 180;
+  const cv = $('fitChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 160;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
   const sc = T.validation.scatter, xs = sc.comps.map(p => p[0]), ys = sc.comps.map(p => p[1]);
   const x0 = Math.min(...xs) - .2, x1 = Math.max(...xs) + .2, y0 = Math.min(...ys) - .2, y1 = Math.max(...ys) + .2;
@@ -160,6 +221,7 @@ function drawFit() {
   for (let d = Math.ceil(x0); d <= Math.floor(x1); d++) g.fillText(fmtDec(d), X(d), Tp + ph + 5);
   g.strokeStyle = '#2C3A4D'; g.strokeRect(L + .5, Tp + .5, pw - 1, ph - 1);
   g.fillStyle = '#35C4B5'; for (const [x, y] of sc.comps) { g.fillRect(X(x) - 1.5, Y(y) - 1.5, 3, 3); }
+  g.fillStyle = '#A9B8C8'; g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText('dots: traded comps · amber: adopted curve · dashed: P25–P75 band', L + 6, Tp + 5);
   g.strokeStyle = '#7E90A5'; g.setLineDash([4, 3]); g.beginPath(); sc.band.forEach(([x, , hi], i) => i ? g.lineTo(X(x), Y(hi)) : g.moveTo(X(x), Y(hi))); g.stroke();
   g.beginPath(); sc.band.forEach(([x, lo], i) => i ? g.lineTo(X(x), Y(lo)) : g.moveTo(X(x), Y(lo))); g.stroke(); g.setLineDash([]);
   g.strokeStyle = '#F0A832'; g.lineWidth = 2; g.beginPath(); sc.curve.forEach(([x, y], i) => i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))); g.stroke();
@@ -167,7 +229,7 @@ function drawFit() {
   g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText('TVL (log $)', L + pw / 2, H - 2);
 }
 function drawClock() {
-  const cv = $('clockChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 180;
+  const cv = $('clockChart'), dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = 160;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
   const pts = T.clock.curve;
   // axes first: percent ticks up the side, labelled ages along the log time axis.
@@ -187,8 +249,8 @@ function drawClock() {
 }
 function renderHero() {
   const v = T.validation, c = T.clock;
-  $('fitStats').innerHTML = `Fitted on the <b>${v.comps} traded tokens</b> the snapshot records. Leave-one-out median miss <b>${v.looMedianMiss.toFixed(2)}x</b> (flat multiple ${v.flatMedianMiss.toFixed(2)}x), <b>${Math.round(v.looWithin3 * 100)}%</b> land within 3x, time-split ${v.timeSplitMiss ? v.timeSplitMiss.toFixed(2) + 'x' : '—'}. Dots: traded comps. Amber: the adopted curve. Dashed: P25–P75 residual band.`;
-  $('clockStats').innerHTML = `Current-status fit on <b>${c.population} protocols</b> (${c.launched} already record a token, ${c.waiting} still wait). Out-of-sample: AUC <b>${c.cv_auc.toFixed(2)}</b>, Brier <b>${c.cv_brier.toFixed(3)}</b> against ${c.base_brier.toFixed(3)} for guessing the base rate. Ages are DefiLlama tracking ages; the clock reads lookalike frequencies, not promises.`;
+  $('fitStats').innerHTML = `Fitted on the <b>${v.comps} traded tokens</b> the snapshot records. Leave-one-out median miss <b>${v.looMedianMiss.toFixed(2)}x</b> (flat multiple ${v.flatMedianMiss.toFixed(2)}x); <b>${Math.round(v.looWithin3 * 100)}%</b> land within 3x; time-split ${v.timeSplitMiss ? v.timeSplitMiss.toFixed(2) + 'x' : '—'}.`;
+  $('clockStats').innerHTML = `Current-status fit on <b>${c.population} protocols</b> (${c.launched} already record a token, ${c.waiting} still wait). Out-of-sample: AUC <b>${c.cv_auc.toFixed(2)}</b>, Brier <b>${c.cv_brier.toFixed(3)}</b> against ${c.base_brier.toFixed(3)} for guessing the base rate.`;
   $('ablTable').innerHTML = '<tr><th>Form</th><th>LOO miss</th><th>Within 3x</th></tr>' + v.ablation.map(a => `<tr class="${a.variant === T.model.kind ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.medianMiss.toFixed(2)}x</td><td>${Math.round(a.within3 * 100)}%</td></tr>`).join('');
   $('boardCounts').innerHTML = `<b>${T.counts.ranked} ranked</b> · watchlist ${T.counts.watchlist}/${T.counts.watchlist} · <a href="#/traded">already trading: ${T.counts.traded}</a> · <a href="#/aside">set aside: ${T.counts.aside}</a> · all ${T.counts.protocols} protocols accounted for.`;
   $('methodText').innerHTML = `
@@ -259,7 +321,8 @@ function init() {
   if (!T) { $('boot').hidden = true; const f = $('fatal'); f.hidden = false; f.textContent = 'The radar data (data.js) did not load, so the board cannot be drawn. Nothing on this page is estimated by hand: without the snapshot output there is nothing to show.'; return; }
   $('boot').hidden = true; $('view-board').hidden = false;
   $('asof').textContent = 'snapshot as of ' + T.as_of;
-  renderHero(); drawFit(); drawClock();
+  EV = evidence();
+  renderHero(); renderEvidence(); drawFit(); drawClock();
   chips($('segChips'), [['all', 'All'], ['watchlist', 'Watchlist'], ['above', 'Above floor'], ['early', 'Early']], state.seg, (k) => { state.seg = k; init2(); });
   chips($('verChips'), [['all', 'Any verdict'], ['Worth farming', 'Worth'], ['Marginal', 'Marginal'], ['Skip', 'Skip']], state.ver, (k) => { state.ver = k; init2(); }, (k) => k === 'Worth farming' ? 'v-go' : k === 'Marginal' ? 'v-warn' : k === 'Skip' ? 'v-skip' : '');
   chips($('depChips'), [['1000', '$1K'], ['10000', '$10K']], String(state.dep), (k) => { state.dep = Number(k); init2(); });

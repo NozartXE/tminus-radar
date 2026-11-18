@@ -89,29 +89,31 @@ function renderEvidence() {
   const ev = EV, c = T.counts, v = T.validation, ck = T.clock;
   const stat = (val, cap, sub, cls = '') => `<div class="stat"><div class="v ${cls}">${val}</div><div class="cap">${cap}</div><div class="sub">${sub}</div></div>`;
   $('statStrip').innerHTML =
-    stat(c.protocols, 'protocols tracked', 'every one accounted for below') +
-    stat(c.ranked, 'ranked pre-token', `${c.above_floor} above the floor · ${c.watchlist} watchlist`) +
-    stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat multiple ×${v.flatMedianMiss.toFixed(2)}`, 'teal') +
-    stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds · out-of-sample', 'P25–P75 / P10–P90 · nominal 50% / 80%', 'teal') +
-    stat(ck.cv_auc.toFixed(2), 'stage-2 AUC · OOS', `${ck.population} protocols · 10-fold`, 'amber') +
-    stat(ck.cv_brier.toFixed(3), 'stage-2 Brier', `${((ck.base_brier - ck.cv_brier) / ck.base_brier * 100).toFixed(1)}% under the ${ck.base_brier.toFixed(3)} base rate`, 'amber');
+    stat(c.protocols, 'protocols tracked', `${c.traded} trading · ${c.aside} aside · ${c.ranked} ranked`) +
+    stat(c.ranked, 'ranked pre-token', `${c.above_floor} above floor · ${c.watchlist} watchlist`) +
+    stat(ev.vc10['Worth farming'], 'worth farming at $10K', `of ${c.ranked} · only ${ev.vc1['Worth farming']} at $1K`, 'teal') +
+    stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat ×${v.flatMedianMiss.toFixed(2)} · 92 comps`, 'teal') +
+    stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds — actual', 'nominal 50/80 · under-covers: 3-in-4', 'teal') +
+    stat(ck.cv_auc.toFixed(2), 'AUC · out-of-sample', `${ck.population} · 10-fold · weak at timing`, 'amber') +
+    stat(ck.cv_brier.toFixed(3), 'Brier · out-of-sample', `base ${ck.base_brier.toFixed(3)} · edge thin`, 'amber');
   const fr = (label, n, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${n}</td></tr>`;
+  const reasons = {}; for (const a of T.aside) reasons[a.reason] = (reasons[a.reason] ?? 0) + 1;
   $('funnelTable').innerHTML = '<tr><th>Disposition</th><th>Count</th></tr>' +
     fr('in the snapshot', c.protocols) +
     fr('already record a token — comps, never ranked', c.traded) +
-    fr('set aside by rule, each with its reason', c.aside) +
-    fr('ranked pre-token — the board below', c.ranked, 'sum') +
+    fr('set aside by rule — reasons below', c.aside) +
+    fr('ranked pre-token — the board below', c.ranked) +
+    fr(`Total — ${c.traded} + ${c.aside} + ${c.ranked} = ${c.protocols}, all accounted for`, c.protocols, 'sum') +
     fr('worth farming at $10K', ev.vc10['Worth farming']) +
     fr('marginal at $10K', ev.vc10.Marginal) +
     fr('skip at $10K', ev.vc10.Skip) +
     fr('worth farming at $1K', ev.vc1['Worth farming']);
-  const reasons = {}; for (const a of T.aside) reasons[a.reason] = (reasons[a.reason] ?? 0) + 1;
   $('funnelNote').innerHTML = `Set aside: ${Object.entries(reasons).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}.`;
   $('abl2Table').innerHTML = '<tr><th>Clock form</th><th>CV AUC</th><th>CV Brier</th></tr>' + ev.abl2.map(a => `<tr class="${a.adopted ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.auc.toFixed(3)}</td><td>${a.brier.toFixed(3)}</td></tr>`).join('');
-  $('abl2Note').innerHTML = `Same seeded 10 folds as the headline scores, refit here on the shipped rows. Age carries the clock; chain count does not — see the critique.`;
+  $('abl2Note').innerHTML = `Same seeded 10 folds, refit here.`;
   $('critList').innerHTML = [
     `Out-of-sample, the P25–P75 band holds <b>${Math.round(ev.covMid * 100)}%</b> of traded comps (calibrated: 50%) and P10–P90 holds <b>${Math.round(ev.covWide * 100)}%</b>, not 80% — read the outer band as a 3-in-4 range.`,
-    `The adopted log-growth tilt beats the linear tilt by <b>${ev.tiltGap.toFixed(2)}×</b> of median miss — inside noise. It is kept for symmetry, not sharpness.`,
+    `The adopted log-growth tilt beats the linear tilt by <b>${ev.tiltGap.toFixed(2)}×</b> of median miss — inside noise. Kept for symmetry, not sharpness.`,
     `The clock's chain-count term does not pay out-of-sample (dropping it: AUC <b>${ev.abl2[1].auc.toFixed(3)}</b> vs <b>${ck.cv_auc.toFixed(3)}</b>), and its Brier edge over the base rate is only <b>${(ck.base_brier - ck.cv_brier).toFixed(3)}</b> — it ranks better than it times.`,
     `Verdicts are hostage to deposit size: <b>${ev.vc10['Worth farming']}</b> of ${c.ranked} plans are worth farming at $10K, only <b>${ev.vc1['Worth farming']}</b> at $1K. Gas and forgone yield, not the model, kill the small farms.`,
     `One snapshot (${esc(T.as_of)}): TVL and 7-day change are single readings, and the clock's ages are tracking ages, not founding dates.`,
@@ -147,6 +149,8 @@ function verify() {
     const range = [nearRank(rr.get(p.slug) ?? [], .1), nearRank(rr.get(p.slug) ?? [], .9)];
     if (JSON.stringify(range) !== JSON.stringify(p.rank_range)) { bad = 'rank range: ' + p.slug; break; }
     const hz = hazard12(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
+    const f0 = clockF(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
+    if (Math.abs(f0 - p.clock.profile_match) > 2e-4) { bad = 'clock F: ' + p.slug; break; }
     // every econ field is compared, not just the verdict: the detail totals
     // strip prints slice, expected slice, costs, forgone, hours, break-even
     // and expected net per hour straight from this block.
@@ -158,16 +162,17 @@ function verify() {
   // scores, the band quantiles the shipped band table, and the rendered numbers
   // the recomputation — anything printed on the first screen is checked here.
   const ev2 = evidence();
+  if (!bad && T.clock.beta.some((b, i) => Math.abs(b - beta[i]) > 1e-6)) bad = 'clock beta';
   if (!bad && (Math.abs(ev2.abl2[0].auc - T.clock.cv_auc) > 5e-4 || Math.abs(ev2.abl2[0].brier - T.clock.cv_brier) > 5e-4)) bad = 'clock ablation';
   if (!bad && JSON.stringify(ev2.gq.map(x => +x.toFixed(6))) !== JSON.stringify(T.band_table.global.map(x => +x.toFixed(6)))) bad = 'band table';
   if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
   const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
   if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
-  else { chip.textContent = `board.json = this page: ${rows.length}/${rows.length} ranks, values, bands, ranges, verdicts, plan totals, funnel and ablations re-run here in ${secs}s`; chip.className = 'chip chip-ok'; }
+  else { chip.textContent = `re-run OK — ${rows.length}/${rows.length} rows: ranks, values, bands, ranges, verdicts, totals, funnel + ablations · ${secs}s`; chip.className = 'chip chip-ok'; }
 }
 
 /* ---------- board UI ---------- */
-const state = { q: '', seg: 'all', ver: 'all', fam: '', chain: '', dep: 10000, sort: 'rank', dir: 1 };
+const state = { q: '', seg: 'all', ver: 'all', fam: '', chain: '', dep: 10000, sort: 'expnet', dir: -1 };
 const VERDICTS = ['Worth farming', 'Marginal', 'Skip'];
 const vClass = (v) => v === 'Worth farming' ? 'go' : v === 'Marginal' ? 'warn' : 'skip';
 function chips(el, items, cur, fn, cls) { el.innerHTML = items.map(([k, label]) => `<button type="button" class="${cls ? cls(k) : ''}" data-k="${esc(k)}" aria-pressed="${String(cur === k)}">${esc(label)}</button>`).join(''); el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => fn(b.dataset.k))); }
@@ -181,10 +186,11 @@ function filtered() {
   rows.sort((a, b) => { const d = key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : a.slug.localeCompare(b.slug); return d * state.dir; });
   return rows;
 }
-function bandGlyph(r) {
-  const lo = Math.log10(r.band[0]), hi = Math.log10(r.band[3]), span = Math.max(hi - lo, 1e-9);
-  const px = (v) => ((Math.log10(v) - lo) / span * 76).toFixed(1);
-  return `<span class="bandg" title="P10 ${fmt$(r.band[0])} · P25 ${fmt$(r.band[1])} · P75 ${fmt$(r.band[2])} · P90 ${fmt$(r.band[3])}"><span class="w" style="left:0;width:76px"></span><span class="b" style="left:${px(r.band[1])}px;width:${Math.max(2, px(r.band[2]) - px(r.band[1]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span><span class="bandnums">P10 ${fmt$(r.band[0])}<br>P90 ${fmt$(r.band[3])}</span>`;
+const BAND_LO = Math.min(...T.rows.map(r => r.band[0])), BAND_HI = Math.max(...T.rows.map(r => r.band[3]));
+const fmtBand = (v) => v >= 1e9 ? '$' + (v / 1e9).toFixed(1) + 'B' : v >= 1e6 ? '$' + Math.round(v / 1e6) + 'M' : v >= 1e3 ? '$' + Math.round(v / 1e3) + 'K' : '$' + Math.round(v);
+function bandCell(r) {
+  const px = (v) => ((Math.log10(v) - Math.log10(BAND_LO)) / (Math.log10(BAND_HI) - Math.log10(BAND_LO)) * 132).toFixed(1);
+  return `<span class="bandline">P10 ${fmtBand(r.band[0])} · P90 ${fmtBand(r.band[3])}</span><span class="bandbar" title="shared log $ scale, ${fmt$(BAND_LO)} to ${fmt$(BAND_HI)}: segment = this row's P10–P90, tick = implied value"><span class="seg" style="left:${px(r.band[0])}px;width:${Math.max(2, px(r.band[3]) - px(r.band[0]))}px"></span><span class="m" style="left:${px(r.implied_value_usd)}px"></span></span>`;
 }
 function renderBoard() {
   const rows = filtered(), dep = String(state.dep);
@@ -194,18 +200,25 @@ function renderBoard() {
     <td>${fmt$(r.tvl_usd)}</td><td>${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'}</td>
     <td>${r.age_days === null ? '—' : r.age_days >= 365 ? (r.age_days / 365).toFixed(1) + 'y' : r.age_days + 'd'}</td>
     <td><span class="hzbar" title="launch rate over the next 12 months, from the clock"><i style="width:${Math.min(100, r.clock.hazard12 * 220)}%"></i></span>${Math.round(r.clock.hazard12 * 100)}%</td>
-    <td><b>${fmt$(r.implied_value_usd)}</b></td><td>${bandGlyph(r)}</td>
+    <td><b>${fmt$(r.implied_value_usd)}</b></td><td>${bandCell(r)}</td>
     <td>${r.rank_range[0]}–${r.rank_range[1]}</td>
-    <td class="${e.expected_net >= 0 ? 'pos' : 'neg'}">${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net))}</td>
+    <td class="${e.expected_net >= 0 ? 'pos' : 'neg'}">${e.expected_net >= 0 ? '+' : '−'}$${Math.round(Math.abs(e.expected_net))}</td>
     <td><span class="verdict ${vClass(e.verdict)}">${esc(e.verdict)}</span></td></tr>`; }).join('');
   $('boardBody').querySelectorAll('tr').forEach(tr => tr.addEventListener('click', () => { location.hash = '#/p/' + tr.dataset.slug; }));
   $('empty').hidden = rows.length > 0;
   const active = state.q || state.seg !== 'all' || state.ver !== 'all' || state.fam || state.chain;
+  $('view-board').classList.toggle('filtered', !!active);
+  const cs = $('compactStrip');
+  if (active) {
+    cs.hidden = false;
+    cs.innerHTML = `<b>T-MINUS</b> · snapshot ${esc(T.as_of)} · ${T.counts.ranked} ranked · ${EV.vc10['Worth farming']} worth at $10K · showing <b>${rows.length} of ${T.counts.ranked}</b>`;
+  } else cs.hidden = true;
+  $('boardNote').innerHTML = `<b>Sorted by expected net</b> at the $${state.dep.toLocaleString()} size, highest first — # is the rank by implied value; click a column to re-sort. <b>Verdicts:</b> Worth = expected net &gt; $0 and ≥ $${T.farm.worth_hour_floor.toFixed(2)}/h · Marginal = expected net &gt; $0, or break-even within 2× the clock's rate · Skip = the rest. <b>Rank range</b> = 10th–90th percentile across 200 seeded bootstrap refits. Age <b>—</b> = no listing date in the snapshot; the clock scores it at a ${UNKNOWN_AGE}-day default.`;
   const fb = $('farmbook');
   if (active && rows.length) {
     const n = rows.length, cap = state.dep * n, fees = rows.reduce((s, r) => s + r.econ[dep].costs, 0), forg = rows.reduce((s, r) => s + r.econ[dep].forgone, 0), hrs = rows.reduce((s, r) => s + r.econ[dep].hours, 0), expS = rows.reduce((s, r) => s + r.econ[dep].expected_slice, 0), slices = rows.reduce((s, r) => s + r.econ[dep].slice, 0);
     fb.hidden = false;
-    fb.innerHTML = `<b>This selection as one farm book</b> — every figure clock-weighted: a slice counts at the launch rate of its protocol, not at face value.
+    fb.innerHTML = `<b>This selection as one farm book</b> — n = ${n} protocols. Every figure clock-weighted: a slice counts at the launch rate of its protocol, not at face value. Book break-even 1 in ${slices > 0 ? Math.max(1, Math.round(slices / (fees + forg))) : '—'} = at face value, that share of the slices must actually land to cover fees + forgone yield.
       <div class="fb-grid"><span>Capital at work<b>${fmt$(cap)}</b></span><span>Fees &amp; gas<b>${fmt$(fees)}</b></span><span>Forgone yield<b>${fmt$(forg)}</b></span><span>Your time<b>${hrs.toFixed(1)} h</b></span><span>Slices if all launch<b>${fmt$(slices)}</b></span><span>Expected slices<b>${fmt$(expS)}</b></span><span>Expected net<b>${fmt$(expS - fees - forg)}</b></span><span>Book break-even<b>${slices > 0 ? '1 in ' + Math.max(1, Math.round(slices / (fees + forg))) : '—'}</b></span></div>`;
   } else fb.hidden = true;
 }
@@ -273,14 +286,23 @@ function renderDetail(slug) {
   const factor = (cap, val) => `<div class="factor"><div class="cap">${cap}</div><div class="val">${val}</div></div>`;
   const depRow = (dep) => { const e = r.econ[String(dep)]; return `<tr><td>$${dep.toLocaleString()}</td><td>${fmt$(e.slice)}</td><td>${fmt$(e.expected_slice)}</td><td>${fmt$(e.costs)}</td><td>${fmt$(e.forgone)}</td><td class="${e.expected_net >= 0 ? 'pos' : 'neg'}">${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net))}</td><td>${e.expected_net >= 0 ? '+' : '−'}$${fmtN(Math.abs(e.expected_net_hour))}</td><td>${e.breakeven === null || !isFinite(e.breakeven) ? '—' : Math.round(e.breakeven * 100) + '%'}</td><td><span class="verdict ${vClass(e.verdict)}">${esc(e.verdict)}</span></td></tr>`; };
   const e10 = r.econ['10000'];
+  const beta = T.clock.beta, bAge = r.age_days ?? UNKNOWN_AGE, bx = clockFeats(r.tvl_usd, bAge, r.chains.length);
+  const bF0 = clockF(beta, r.tvl_usd, bAge, r.chains.length), bF1 = clockF(beta, r.tvl_usd, bAge + 365, r.chains.length), bHz = hazard12(beta, r.tvl_usd, bAge, r.chains.length);
+  const gmExact = impliedOf(r, { kind: T.model.kind, a: T.model.a, b: T.model.b, g: T.model.growthCoef, s: T.model.seasonCoef, family: T.model.family }).gm;
+  const contrib = (v) => `${v >= 0 ? '+' : '−'}${fmtN(Math.abs(v))}`;
   const signed$ = (v) => `${v >= 0 ? '+' : '−'}$${fmtN(Math.abs(v))}`;
   const tile = (val, cap, sub, cls) => `<div class="stat"><div class="v${cls ? ' ' + cls : ''}">${val}</div><div class="cap">${cap}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
   $('view-detail').innerHTML = `
     <a class="backlink" href="#/">← Back to the board</a>
-    <div class="d-head"><div><h1>${esc(r.name)}</h1><div class="sub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.join(', ') || 'no chain listed')} · TVL ${fmt$(r.tvl_usd)} · 7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'} · rank #${r.rank} (range ${r.rank_range[0]}–${r.rank_range[1]})${r.watchlist ? ' · on the watchlist' : ''}</div></div>
+    <div class="d-head"><div><h1>${esc(r.name)}</h1><div class="sub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.slice(0, 3).join(', ') || 'no chain listed')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''} · TVL ${fmt$(r.tvl_usd)} · 7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'} · rank #${r.rank} (range ${r.rank_range[0]}–${r.rank_range[1]})${r.watchlist ? ' · on the watchlist' : ''}</div></div>
     <div class="d-big"><div><div class="cap">implied value if it launched at this record</div><div class="v">${fmt$(r.implied_value_usd)}</div></div><div><div class="cap">launch rate, next 12 months</div><div class="h">${Math.round(r.clock.hazard12 * 100)}% / yr</div></div></div></div>
     <div class="totals-h">The farm at the $10,000 size — totals</div><div class="totals" id="totalsStrip">
       ${tile(fmt$(e10.slice), 'Slice if launch')}${tile(fmt$(e10.expected_slice), 'Expected slice', `${Math.round(r.clock.hazard12 * 100)}% launch rate`)}${tile(fmt$(e10.costs), 'Fees and gas')}${tile(fmt$(e10.forgone), 'Yield forgone')}${tile(e10.hours.toFixed(1) + 'h', 'Your time', `over ${e10.weeks} weeks`)}${tile(signed$(e10.expected_net), 'Expected net', signed$(e10.expected_net_hour) + '/h', e10.expected_net >= 0 ? 'pos' : 'neg')}${tile(e10.breakeven === null || !isFinite(e10.breakeven) ? '—' : Math.round(e10.breakeven * 100) + '%', 'Break-even launch rate')}${tile(esc(e10.verdict), 'Verdict', '', vClass(e10.verdict))}
+    </div>
+    <div class="totals-h">How the two headline numbers are built</div><div class="buildup" id="buildup">
+      <div class="bu-row"><span class="bu-cap">Stage 1 — value</span>TVL <b>${fmt$(r.tvl_usd)}</b> → size curve <b>${fmt$(f.curve_value_usd)}</b> → × growth tilt <b>${gmExact.toFixed(4)}</b> (7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'}, log tilt) → <b>implied value ${fmt$(r.implied_value_usd)}</b> · band P10 ${fmt$(band[0])} – P90 ${fmt$(band[3])}</div>
+      <div class="bu-row"><span class="bu-cap">Stage 2 — clock</span>drivers, logit points: size <b>${contrib(beta[1] * bx[0])}</b> · age <b>${contrib(beta[2] * bx[1])}</b> · chains <b>${contrib(beta[3] * bx[2])}</b> · base <b>${contrib(beta[0])}</b> → F(today) <b>${Math.round(bF0 * 100)}%</b> → F(+1y) <b>${Math.round(bF1 * 100)}%</b> → <b>launch rate (${Math.round(bF1 * 100)}% − ${Math.round(bF0 * 100)}%) / (1 − ${Math.round(bF0 * 100)}%) = ${Math.round(bHz * 100)}% / yr</b></div>
+      <div class="bu-row"><span class="bu-cap">Snapshot record</span>listed <b>${esc(r.listed_at ?? 'null')}</b> · tracked <b>${r.age_days === null ? '—' : r.age_days + 'd'}</b> · chains <b>${esc(r.chains.slice(0, 3).join(', ') || 'none listed')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''}</b> · status: <b>no token recorded</b> (gecko_id and symbol both null)</div>
     </div>
     <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at the $10,000 size</h2><ol class="steps">
       ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>

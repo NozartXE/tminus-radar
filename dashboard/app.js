@@ -91,8 +91,8 @@ function renderEvidence() {
   $('statStrip').innerHTML =
     stat(c.protocols, 'protocols tracked', 'every one accounted for below') +
     stat(c.ranked, 'ranked pre-token', `${c.above_floor} above the floor · ${c.watchlist} watchlist`) +
-    stat(v.comps, 'comps in the fit', `of ${c.traded} already trading`, 'teal') +
     stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat multiple ×${v.flatMedianMiss.toFixed(2)}`, 'teal') +
+    stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds · out-of-sample', 'P25–P75 / P10–P90 · nominal 50% / 80%', 'teal') +
     stat(ck.cv_auc.toFixed(2), 'stage-2 AUC · OOS', `${ck.population} protocols · 10-fold`, 'amber') +
     stat(ck.cv_brier.toFixed(3), 'stage-2 Brier', `${((ck.base_brier - ck.cv_brier) / ck.base_brier * 100).toFixed(1)}% under the ${ck.base_brier.toFixed(3)} base rate`, 'amber');
   const fr = (label, n, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${n}</td></tr>`;
@@ -214,7 +214,7 @@ function drawFit() {
   // so the plot reads on its own — market cap against TVL, in dollars.
   const L = 48, R = 10, Tp = 8, B = 32, pw = W - L - R, ph = H - Tp - B;
   const X = (v) => L + (v - x0) / (x1 - x0) * pw, Y = (v) => Tp + ph - (v - y0) / (y1 - y0) * ph;
-  g.font = '10.5px sans-serif';
+  g.font = '12px sans-serif';
   g.strokeStyle = '#232F42'; g.fillStyle = '#A9B8C8'; g.textAlign = 'right'; g.textBaseline = 'middle';
   for (let d = Math.ceil(y0); d <= Math.floor(y1); d++) { const y = Y(d); g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(fmtDec(d), L - 6, y); }
   g.textAlign = 'center'; g.textBaseline = 'top';
@@ -235,7 +235,7 @@ function drawClock() {
   // axes first: percent ticks up the side, labelled ages along the log time axis.
   const L = 46, R = 10, Tp = 8, B = 32, pw = W - L - R, ph = H - Tp - B;
   const X = (a) => L + Math.log10(a / 90) / Math.log10(2555 / 90) * pw, Y = (v) => Tp + ph - v * ph;
-  g.font = '10.5px sans-serif';
+  g.font = '12px sans-serif';
   g.strokeStyle = '#232F42'; g.fillStyle = '#A9B8C8'; g.textAlign = 'right'; g.textBaseline = 'middle';
   for (const t of [0, .25, .5, .75, 1]) { const y = Y(t); g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(Math.round(t * 100) + '%', L - 6, y); }
   g.textAlign = 'center'; g.textBaseline = 'top';
@@ -272,6 +272,8 @@ function renderDetail(slug) {
     <a class="backlink" href="#/">← Back to the board</a>
     <div class="d-head"><div><h1>${esc(r.name)}</h1><div class="sub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.join(', ') || 'no chain listed')} · TVL ${fmt$(r.tvl_usd)} · 7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'} · rank #${r.rank} (range ${r.rank_range[0]}–${r.rank_range[1]})${r.watchlist ? ' · on the watchlist' : ''}</div></div>
     <div class="d-big"><div><div class="cap">implied value if it launched at this record</div><div class="v">${fmt$(r.implied_value_usd)}</div></div><div><div class="cap">launch rate, next 12 months</div><div class="h">${Math.round(r.clock.hazard12 * 100)}% / yr</div></div></div></div>
+    <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at the $10,000 size</h2><ol class="steps">
+      ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>
     <div class="d-grid">
       <div class="panel"><h2>The value build</h2><div class="factors">
         ${factor('TVL', fmt$(r.tvl_usd))}<span class="factor-arrow">→</span>${factor('Size curve', fmt$(f.curve_value_usd))}<span class="factor-arrow">×</span>${factor('Growth tilt', f.growth_multiplier.toFixed(2) + 'x')}${f.family_multiplier !== 1 ? `<span class="factor-arrow">×</span>${factor('Category', f.family_multiplier.toFixed(2) + 'x')}` : ''}${f.season_multiplier !== 1 ? `<span class="factor-arrow">×</span>${factor('Seasoning', f.season_multiplier.toFixed(2) + 'x')}` : ''}<span class="factor-arrow">=</span>${factor('Implied value', fmt$(r.implied_value_usd))}
@@ -285,8 +287,6 @@ function renderDetail(slug) {
       <p class="stats">The clock is fitted on ${T.clock.population} comparable protocols in this snapshot (${T.clock.launched} launched, ${T.clock.waiting} waiting), cross-validated AUC ${T.clock.cv_auc.toFixed(2)}. It prices the farm below; it does not move the implied value, which is what the token would be worth if the launch happened at today's record.</p>
       <h2 style="margin-top:24px">The farm, priced both ways</h2><table class="data"><tr><th>Deposit</th><th>Slice</th><th>Expected slice</th><th>Costs</th><th>Forgone</th><th>Expected net</th><th>Per hour</th><th>Break-even</th><th>Verdict</th></tr>${depRow(1000)}${depRow(10000)}</table>
       <p class="stats">Slice assumes a ${(T.farm.airdrop_share * 100).toFixed(1)}% airdrop of the implied value, split pro-rata. Expected slice = slice x the ${Math.round(r.clock.hazard12 * 100)}% launch rate. Break-even is the launch rate at which the plan pays for itself.</p></div>
-      <div class="panel" style="grid-column:1/-1"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at the $10,000 size</h2><ol class="steps">
-      ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>
       <div class="panel" style="grid-column:1/-1"><h2>The snapshot record</h2><dl class="kv">
         <dt>slug</dt><dd>${esc(r.slug)}</dd><dt>category</dt><dd>${esc(r.category ?? 'null')}</dd><dt>chains</dt><dd>${esc(r.chains.join(', ') || '—')}</dd>
         <dt>TVL</dt><dd>$${r.tvl_usd.toLocaleString()}</dd><dt>7-day change</dt><dd>${r.change_7d === null ? 'null' : r.change_7d + '%'}</dd>

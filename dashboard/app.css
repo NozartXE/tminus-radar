@@ -8,7 +8,7 @@
   --amber:#F0A832; --teal:#35C4B5;
   --go:#43B581; --warn:#E8B33D; --skip:#E86A54;
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
-  --fs-xs:12.8px; --fs-s:14px; --fs-m:16px; --fs-l:20px; --fs-xl:25px; --fs-xxl:31px;
+  --fs-xs:13.5px; --fs-s:14px; --fs-m:16px; --fs-l:20px; --fs-xl:25px; --fs-xxl:31px;
   --sans:"Avenir Next","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
@@ -20,7 +20,7 @@ a{color:var(--teal);text-decoration:none}
 a:hover{text-decoration:underline}
 button{font-family:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--amber);outline-offset:1px}
-.num,.board td,.abl td,.stats,.kv dd,table.data td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num,.board td:not(.left),.abl td,.stats,.kv dd,table.data td{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 /* top bar */
 .topbar{display:flex;justify-content:space-between;align-items:center;padding:var(--s3) var(--s5);border-bottom:1px solid var(--line);background:var(--panel)}
@@ -52,7 +52,7 @@ main{padding:var(--s5);max-width:1560px;margin:0 auto}
 .abl tr.sum td{color:var(--ink);font-weight:600}
 
 /* stat strip + evidence row: the first screen carries the proof, not just charts */
-.statstrip{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--s4);margin-bottom:var(--s4)}
+.statstrip{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--s4);margin-bottom:var(--s3)}
 .stat{border:1px solid var(--line);background:var(--panel);padding:var(--s2) var(--s3)}
 .stat .v{font-family:var(--mono);font-size:var(--fs-l);line-height:1.15}
 .stat .v.teal{color:var(--teal)} .stat .v.amber{color:var(--amber)}
@@ -84,7 +84,7 @@ main{padding:var(--s5);max-width:1560px;margin:0 auto}
 
 /* board table */
 .tablewrap{border:1px solid var(--line);background:var(--panel);overflow-x:auto}
-table.board{width:100%;border-collapse:collapse;font-size:var(--fs-xs)}
+table.board{width:100%;border-collapse:collapse;font-size:14.5px}
 .board th{position:sticky;top:0;background:var(--panel2);color:var(--ink2);text-align:right;font-weight:600;padding:var(--s2) var(--s3);border-bottom:1px solid var(--line2);white-space:nowrap;cursor:pointer;font-family:var(--sans)}
 .board th.left,.board td.left{text-align:left}
 .board td{padding:var(--s2) var(--s3);border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;vertical-align:middle}
@@ -140,6 +140,9 @@ table.data td:first-child,table.data th:first-child{text-align:left}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:var(--s1) var(--s4);font-size:var(--fs-xs)}
 .kv dt{color:var(--ink3)} .kv dd{margin:0;text-align:right}
 .steps{list-style:none;margin:0;padding:0}
+.plan-panel{margin-bottom:var(--s4)}
+.plan-panel h2{font-size:var(--fs-s);text-transform:uppercase;letter-spacing:.08em;color:var(--ink2);margin-bottom:var(--s3)}
+.plan-panel .steps li{padding:10px 0}
 .steps li{display:grid;grid-template-columns:86px 1fr auto;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--line)}
 .steps .when{color:var(--amber);font-weight:600;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.05em}
 .steps .txt{color:var(--ink)}

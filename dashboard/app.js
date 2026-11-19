@@ -102,11 +102,12 @@ let EV = null;
 function renderEvidence() {
 const ev = EV, c = T.counts, v = T.validation, ck = T.clock;
 const stat = (val, cap, sub, cls = '') => `<div class="stat"><div class="v ${cls}">${val}</div><div class="cap">${cap}</div><div class="sub">${sub}</div></div>`;
+const ad0=T.validation.ablation.find(a=>a.variant===T.model.kind);
 $('statStrip').innerHTML =
 stat(c.protocols, 'protocols tracked', `${c.traded} trading · ${c.aside} aside · ${c.ranked} ranked`) +
 stat(c.ranked, 'ranked pre-token', `${c.above_floor} above floor · ${c.watchlist} watch`) +
 stat(ev.vc10['Worth farming'], 'worth farming at $10K', `of ${c.ranked} · only ${ev.vc1['Worth farming']} at $1K`, 'teal') +
-stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat ×${v.flatMedianMiss.toFixed(2)} · ${v.comps} comps`, 'teal') +
+stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat ×${v.flatMedianMiss.toFixed(2)} · split ×${ad0.timeSplitMiss.toFixed(2)} · ${v.comps} comps`, 'teal') +
 stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds — actual', `nominal 50/80 · outer widened ×${ev.calF.toFixed(2)}`, 'teal') +
 stat(ck.cv_auc.toFixed(3), 'AUC · out-of-sample', `${ck.population} · 10-fold · weak at timing`, 'amber') +
 stat(ck.cv_brier.toFixed(3), 'Brier · out-of-sample', `base ${ck.base_brier.toFixed(3)} · edge thin`, 'amber');
@@ -117,7 +118,6 @@ $('funnelLine').innerHTML = `<b>${c.protocols}</b> in the snapshot → <b>${c.tr
 $('funnelNote').innerHTML = `Set aside: ${Object.entries(reasons).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}.`;
 const w3=[...T.rows].filter(r=>r.econ['10000'].verdict==='Worth farming').sort((a,b)=>b.econ['10000'].expected_net-a.econ['10000'].expected_net).slice(0,3);
 $('farmLine').textContent='Farm next at $10K — '+w3.map(r=>r.name+' +$'+Math.round(r.econ['10000'].expected_net)).join(' · ');
-const ad0=T.validation.ablation.find(a=>a.variant===T.model.kind);
 $('validLine').textContent='Validation — adopted '+ad0.label+' · LOO ×'+v.looMedianMiss.toFixed(2)+' · time-split ×'+ad0.timeSplitMiss.toFixed(2)+' · clock AUC '+ck.cv_auc.toFixed(3);
 $('abl2Table').innerHTML = '<tr><th>Clock form</th><th>CV AUC</th><th>CV Brier</th></tr>' + ev.abl2.map(a => `<tr class="${a.adopted ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.auc.toFixed(3)}</td><td>${a.brier.toFixed(3)}</td></tr>`).join('');
 $('abl2Note').innerHTML = `Same seeded 10 folds, refit here. The chain-count term was dropped this round: AUC ${ev.abl2[1].auc.toFixed(3)} against the adopted ${ck.cv_auc.toFixed(3)}.`;
@@ -168,7 +168,7 @@ if (!bad && JSON.stringify(ev2.gq.map(x => +x.toFixed(6))) !== JSON.stringify(T.
 if (!bad && Math.abs(ev2.calF - T.band_table.calibration) > 1e-9) bad = 'band calibration';
 if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
 if(!bad&&$('farmLine').textContent!=='Farm next at $10K — '+[...rows].filter(r=>r.econ['10000'].verdict==='Worth farming').sort((a,b)=>b.econ['10000'].expected_net-a.econ['10000'].expected_net).slice(0,3).map(r=>r.name+' +$'+Math.round(r.econ['10000'].expected_net)).join(' · '))bad='farm next';
-if(!bad){const ad9=T.validation.ablation.find(a=>a.variant===kind);if($('validLine').textContent!=='Validation — adopted '+ad9.label+' · LOO ×'+T.validation.looMedianMiss.toFixed(2)+' · time-split ×'+ad9.timeSplitMiss.toFixed(2)+' · clock AUC '+T.clock.cv_auc.toFixed(3))bad='validation line';}
+if(!bad){const ad9=T.validation.ablation.find(a=>a.variant===kind);if($('validLine').textContent!=='Validation — adopted '+ad9.label+' · LOO ×'+T.validation.looMedianMiss.toFixed(2)+' · time-split ×'+ad9.timeSplitMiss.toFixed(2)+' · clock AUC '+T.clock.cv_auc.toFixed(3))bad='validation line';if(!bad&&!$('statStrip').textContent.includes('split ×'+ad9.timeSplitMiss.toFixed(2)))bad='split tile';}
 const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
 if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
 else { chip.textContent = `re-run OK — ${rows.length}/${rows.length} rows: ranks, values, bands, ranges, verdicts, totals, min deposits, funnel + ablations, farm next · ${secs}s`; chip.className = 'chip chip-ok'; }
@@ -306,7 +306,7 @@ function renderDetail(slug) {
       <div class="bu-row"><span class="bu-cap">Stage 2 — clock</span>drivers, logit points: size <b>${contrib(beta[1] * bx[0])}</b> · age <b>${contrib(beta[2] * bx[1])}</b> · base <b>${contrib(beta[0])}</b> → logit <b>${contrib(bZ)}</b> → F(today) <b>${pct2(bF0)}</b> → F(+1y) <b>${pct2(bF1)}</b> → <b>launch rate (${pct2(bF1)} − ${pct2(bF0)}) / (1 − ${pct2(bF0)}) = ${(bHz * 100).toFixed(1)}% / yr</b></div>
       <div class="bu-row"><span class="bu-cap">Snapshot record</span>listed <b>${esc(r.listed_at ?? 'null')}</b> · tracked <b>${r.age_days === null ? '—' : r.age_days + 'd'}</b> · chains <b>${esc(r.chains.slice(0, 3).join(', ') || 'none listed')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''}</b> · status: <b>no token recorded</b> (gecko_id and symbol both null)</div>
     </div>
-    <div class="panel" id="compsPanel" style="margin-bottom:8px"><h2>Nearest traded comparables — by TVL</h2><table class="data"><tr><th>Protocol</th><th>TVL</th><th>Market cap</th><th>Curve says</th><th>Actual / curve</th></tr>
+    <div class="panel" id="compsPanel" style="margin-bottom:4px"><h2>Nearest traded comparables — by TVL</h2><table class="data"><tr><th>Protocol</th><th>TVL</th><th>Market cap</th><th>Curve says</th><th>Actual / curve</th></tr>
       ${r.comps_near.map(c => `<tr><td>${esc(c.name)}${c.symbol ? ' (' + esc(c.symbol) + ')' : ''}</td><td>${fmt$(c.tvl_usd)}</td><td>${fmt$(c.mcap_usd)}</td><td>${fmt$(c.curve_value_usd)}</td><td>${c.ratio.toFixed(2)}x</td></tr>`).join('')}</table></div>
     <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at $10,000</h2><ol class="steps">
       ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>

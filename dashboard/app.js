@@ -1,5 +1,5 @@
 'use strict';
-/* T-Minus dashboard: the page refits both model stages in-page and verifies every printed number (chip). */
+/* T-Minus dashboard. */
 const T = window.TMINUS;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -17,42 +17,42 @@ const logGrowthIn = (p) => Math.log1p(growthIn(p));
 const seasonIn = (p) => 1 - Math.exp(-(ageDaysOf(p.listed_at) ?? UNKNOWN_AGE) / 540);
 function familyOffsets(comps, basePredict) { const sums = new Map(); comps.forEach(p => { const c = p.category ?? '', r = Math.log10(p.mcap_usd) - basePredict(p); sums.set(c, [...(sums.get(c) ?? []), r]); }); const fam = {}; for (const [c, rs] of sums) fam[c] = rs.reduce((s, x) => s + x, 0) / rs.length * rs.length / (rs.length + 16); return fam; }
 function fitForm(comps, variant) {
-  if (variant === 'flat') { const ratio = median(comps.map(p => p.mcap_usd / p.tvl_usd)), rawA = Math.log10(Math.max(ratio, 1e-12)), shift = median(comps.map(p => Math.log10(p.mcap_usd) - rawA - Math.log10(Math.max(1e-12, p.tvl_usd)))), a = rawA + shift; return { kind: variant, a, b: 1, g: 0, s: 0, family: {}, predict: (p) => a + Math.log10(Math.max(1e-12, p.tvl_usd)) }; }
-  const base = variant === 'family' ? 'loggrowth' : variant;
-  const xs = comps.map(p => Math.log10(Math.max(1e-12, p.tvl_usd))), ys = comps.map(p => Math.log10(p.mcap_usd));
-  const f = huber(xs, ys), residual = ys.map((y, i) => y - f.a - f.b * xs[i]);
-  const gIn = base === 'growth' ? growthIn : logGrowthIn;
-  let g = 0, s = 0;
-  if (base !== 'curve') g = ols(comps.map(gIn), residual).b;
-  if (base === 'loggrowthseason') { const r2 = residual.map((r, i) => r - g * gIn(comps[i])); s = ols(comps.map(seasonIn), r2).b; }
-  const raw = (p) => f.a + f.b * Math.log10(Math.max(1e-12, p.tvl_usd)) + (base === 'curve' ? 0 : g * gIn(p)) + (base === 'loggrowthseason' ? s * seasonIn(p) : 0);
-  const shift = median(comps.map(p => Math.log10(p.mcap_usd) - raw(p)));
-  const centered = (p) => raw(p) + shift;
-  if (variant === 'family') { const off = familyOffsets(comps, centered); return { kind: variant, a: f.a + shift, b: f.b, g, s, family: off, predict: (p) => centered(p) + (off[p.category ?? ''] ?? 0) }; }
-  return { kind: variant, a: f.a + shift, b: f.b, g, s, family: {}, predict: centered };
+if (variant === 'flat') { const ratio = median(comps.map(p => p.mcap_usd / p.tvl_usd)), rawA = Math.log10(Math.max(ratio, 1e-12)), shift = median(comps.map(p => Math.log10(p.mcap_usd) - rawA - Math.log10(Math.max(1e-12, p.tvl_usd)))), a = rawA + shift; return { kind: variant, a, b: 1, g: 0, s: 0, family: {}, predict: (p) => a + Math.log10(Math.max(1e-12, p.tvl_usd)) }; }
+const base = variant === 'family' ? 'loggrowth' : variant;
+const xs = comps.map(p => Math.log10(Math.max(1e-12, p.tvl_usd))), ys = comps.map(p => Math.log10(p.mcap_usd));
+const f = huber(xs, ys), residual = ys.map((y, i) => y - f.a - f.b * xs[i]);
+const gIn = base === 'growth' ? growthIn : logGrowthIn;
+let g = 0, s = 0;
+if (base !== 'curve') g = ols(comps.map(gIn), residual).b;
+if (base === 'loggrowthseason') { const r2 = residual.map((r, i) => r - g * gIn(comps[i])); s = ols(comps.map(seasonIn), r2).b; }
+const raw = (p) => f.a + f.b * Math.log10(Math.max(1e-12, p.tvl_usd)) + (base === 'curve' ? 0 : g * gIn(p)) + (base === 'loggrowthseason' ? s * seasonIn(p) : 0);
+const shift = median(comps.map(p => Math.log10(p.mcap_usd) - raw(p)));
+const centered = (p) => raw(p) + shift;
+if (variant === 'family') { const off = familyOffsets(comps, centered); return { kind: variant, a: f.a + shift, b: f.b, g, s, family: off, predict: (p) => centered(p) + (off[p.category ?? ''] ?? 0) }; }
+return { kind: variant, a: f.a + shift, b: f.b, g, s, family: {}, predict: centered };
 }
 function looBands(comps, kind) {
-  const pct = (v, q) => { const a = [...v].sort((x, y) => x - y); return a.length ? a[Math.max(0, Math.ceil(q * a.length) - 1)] : 0; };
-  const qs = (v) => [.1, .25, .75, .9].map(q => Math.max(-1, Math.min(1, pct(v, q))));
-  const res = [], buckets = new Map();
-  for (let i = 0; i < comps.length; i++) { const f = fitForm(comps.filter((_, j) => j !== i), kind), r = Math.log10(comps[i].mcap_usd) - f.predict(comps[i]), key = Math.floor(Math.log10(comps[i].tvl_usd)); res.push(r); buckets.set(key, [...(buckets.get(key) ?? []), r]); }
-  const gRaw = qs(res), bRaw = new Map([...buckets].filter(([, v]) => v.length >= 8).map(([k, v]) => [k, qs(v)]));
-  const calF = bandCalFactor(res, comps.map(p => bRaw.get(Math.floor(Math.log10(p.tvl_usd))) ?? gRaw));
-  const widen = (q) => [q[0] * calF, q[1], q[2], q[3] * calF];
-  return { res, calF, gq: widen(gRaw), bq: new Map([...bRaw].map(([k, v]) => [k, widen(v)])) };
+const pct = (v, q) => { const a = [...v].sort((x, y) => x - y); return a.length ? a[Math.max(0, Math.ceil(q * a.length) - 1)] : 0; };
+const qs = (v) => [.1, .25, .75, .9].map(q => Math.max(-1, Math.min(1, pct(v, q))));
+const res = [], buckets = new Map();
+for (let i = 0; i < comps.length; i++) { const f = fitForm(comps.filter((_, j) => j !== i), kind), r = Math.log10(comps[i].mcap_usd) - f.predict(comps[i]), key = Math.floor(Math.log10(comps[i].tvl_usd)); res.push(r); buckets.set(key, [...(buckets.get(key) ?? []), r]); }
+const gRaw = qs(res), bRaw = new Map([...buckets].filter(([, v]) => v.length >= 8).map(([k, v]) => [k, qs(v)]));
+const calF = bandCalFactor(res, comps.map(p => bRaw.get(Math.floor(Math.log10(p.tvl_usd))) ?? gRaw));
+const widen = (q) => [q[0] * calF, q[1], q[2], q[3] * calF];
+return { res, calF, gq: widen(gRaw), bq: new Map([...bRaw].map(([k, v]) => [k, widen(v)])) };
 }
 function impliedOf(p, m) {
-  const curve = Math.max(1, Math.round(10 ** (m.a + m.b * Math.log10(Math.max(1e-12, p.tvl_usd)))));
-  const gm = m.kind === 'curve' || m.kind === 'flat' ? 1 : m.kind === 'growth' ? Math.max(.35, Math.min(2, 10 ** (m.g * growthIn(p)))) : Math.max(.35, Math.min(2, 10 ** (m.g * logGrowthIn(p))));
-  const sm = m.kind === 'loggrowthseason' ? Math.max(.4, Math.min(1.6, 10 ** (m.s * seasonIn(p)))) : 1;
-  const fm = m.kind === 'family' ? Math.max(.4, Math.min(2.5, 10 ** (m.family[p.category ?? ''] ?? 0))) : 1;
-  return { value: Math.max(1, Math.round(curve * gm * sm * fm)), curve, gm, sm, fm };
+const curve = Math.max(1, Math.round(10 ** (m.a + m.b * Math.log10(Math.max(1e-12, p.tvl_usd)))));
+const gm = m.kind === 'curve' || m.kind === 'flat' ? 1 : m.kind === 'growth' ? Math.max(.35, Math.min(2, 10 ** (m.g * growthIn(p)))) : Math.max(.35, Math.min(2, 10 ** (m.g * logGrowthIn(p))));
+const sm = m.kind === 'loggrowthseason' ? Math.max(.4, Math.min(1.6, 10 ** (m.s * seasonIn(p)))) : 1;
+const fm = m.kind === 'family' ? Math.max(.4, Math.min(2.5, 10 ** (m.family[p.category ?? ''] ?? 0))) : 1;
+return { value: Math.max(1, Math.round(curve * gm * sm * fm)), curve, gm, sm, fm };
 }
 function solveLin(A, b) { const n = b.length, M = A.map((row, i) => [...row, b[i]]); for (let c = 0; c < n; c++) { let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r; const tmp = M[c]; M[c] = M[piv]; M[piv] = tmp; const d = M[c][c] || 1e-12; for (let r = 0; r < n; r++) { if (r === c) continue; const f = M[r][c] / d; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; } } return M.map((row, i) => row[n] / (row[i] || 1e-12)); }
 function fitClock(rows) {
-  const X = rows.map(r => [1, ...r.x]), y = rows.map(r => r.y), k = X[0].length, beta = new Array(k).fill(0);
-  for (let it = 0; it < 100; it++) { const grad = new Array(k).fill(0), H = Array.from({ length: k }, () => new Array(k).fill(0)); for (let i = 0; i < X.length; i++) { const z = X[i].reduce((s, v, j) => s + v * beta[j], 0), pr = 1 / (1 + Math.exp(-z)), w = pr * (1 - pr); for (let a = 0; a < k; a++) { grad[a] += X[i][a] * (y[i] - pr); for (let b = 0; b < k; b++) H[a][b] += X[i][a] * w * X[i][b]; } } for (let a = 1; a < k; a++) { grad[a] -= beta[a]; H[a][a] += 1; } const step = solveLin(H, grad); let mx = 0; for (let a = 0; a < k; a++) { beta[a] += step[a]; mx = Math.max(mx, Math.abs(step[a])); } if (mx < 1e-10) break; }
-  return beta;
+const X = rows.map(r => [1, ...r.x]), y = rows.map(r => r.y), k = X[0].length, beta = new Array(k).fill(0);
+for (let it = 0; it < 100; it++) { const grad = new Array(k).fill(0), H = Array.from({ length: k }, () => new Array(k).fill(0)); for (let i = 0; i < X.length; i++) { const z = X[i].reduce((s, v, j) => s + v * beta[j], 0), pr = 1 / (1 + Math.exp(-z)), w = pr * (1 - pr); for (let a = 0; a < k; a++) { grad[a] += X[i][a] * (y[i] - pr); for (let b = 0; b < k; b++) H[a][b] += X[i][a] * w * X[i][b]; } } for (let a = 1; a < k; a++) { grad[a] -= beta[a]; H[a][a] += 1; } const step = solveLin(H, grad); let mx = 0; for (let a = 0; a < k; a++) { beta[a] += step[a]; mx = Math.max(mx, Math.abs(step[a])); } if (mx < 1e-10) break; }
+return beta;
 }
 const clockFeats = (tvl, age, chains) => [Math.log10(Math.max(1, tvl)), Math.log10(age + 30), Math.min(chains, 8)];
 const clockAdopted = (tvl, age) => [Math.log10(Math.max(1, tvl)), Math.log10(age + 30)];
@@ -61,12 +61,12 @@ function bandCalFactor(residuals, bands) { const need = residuals.map((r, i) => 
 const fmtInt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const fmtCents = (v) => fmtInt(Math.floor(v)) + '.' + String(Math.round((v - Math.floor(v)) * 100)).padStart(2, '0');
 function minViable(p, value, age, hz) {
-  const weeks = weeksFor(age), gas = GAS[chainClass(p)], costs = gas.setup + gas.weekly * weeks + gas.claim, A = hz * T.farm.airdrop_share * value, Tv = p.tvl_usd, c = YB.has(p.category ?? '') ? 0 : T.farm.forgone_apr * weeks / 52;
-  if (c === 0) return A > costs ? round2(costs * Tv / (A - costs)) : null;
-  const B = A - c * Tv - costs, disc = B * B - 4 * c * costs * Tv;
-  if (B <= 0 || disc < 0) return null;
-  const d = (B - Math.sqrt(disc)) / (2 * c);
-  return d > 0 ? round2(d) : null;
+const weeks = weeksFor(age), gas = GAS[chainClass(p)], costs = gas.setup + gas.weekly * weeks + gas.claim, A = hz * T.farm.airdrop_share * value, Tv = p.tvl_usd, c = YB.has(p.category ?? '') ? 0 : T.farm.forgone_apr * weeks / 52;
+if (c === 0) return A > costs ? round2(costs * Tv / (A - costs)) : null;
+const B = A - c * Tv - costs, disc = B * B - 4 * c * costs * Tv;
+if (B <= 0 || disc < 0) return null;
+const d = (B - Math.sqrt(disc)) / (2 * c);
+return d > 0 ? round2(d) : null;
 }
 const hazard12 = (beta, tvl, age, chains) => { const f0 = clockF(beta, tvl, age, chains); return (clockF(beta, tvl, age + 365, chains) - f0) / Math.max(1 - f0, 1e-9); };
 function mulberry(seed) { return () => { let t = seed += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -75,97 +75,103 @@ function chainClass(p) { const c = p.chains[0] ?? ''; return c === 'Ethereum' ? 
 const weeksFor = (age) => age === null ? 8 : age < 180 ? 12 : age < 365 ? 10 : age < 730 ? 8 : 6;
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 function farmEcon(p, value, age, dep, hz) {
-  const weeks = weeksFor(age), gas = GAS[chainClass(p)], slice = T.farm.airdrop_share * value * dep / (dep + p.tvl_usd), costs = gas.setup + gas.weekly * weeks + gas.claim, forgone = YB.has(p.category ?? '') ? 0 : round2(dep * T.farm.forgone_apr * weeks / 52), hours = (T.farm.minutes.setup + T.farm.minutes.weekly * weeks + T.farm.minutes.claim) / 60, breakeven = slice > 0 ? (costs + forgone) / slice : Infinity, expSlice = hz * slice, expNet = expSlice - costs - forgone, expHr = expNet / hours;
-  const verdict = expNet > 0 && expHr >= T.farm.worth_hour_floor ? 'Worth farming' : expNet > 0 || breakeven <= 2 * hz ? 'Marginal' : 'Skip';
-  return { slice, costs, forgone, hours, breakeven, expSlice, expNet, expHr, verdict };
+const weeks = weeksFor(age), gas = GAS[chainClass(p)], slice = T.farm.airdrop_share * value * dep / (dep + p.tvl_usd), costs = gas.setup + gas.weekly * weeks + gas.claim, forgone = YB.has(p.category ?? '') ? 0 : round2(dep * T.farm.forgone_apr * weeks / 52), hours = (T.farm.minutes.setup + T.farm.minutes.weekly * weeks + T.farm.minutes.claim) / 60, breakeven = slice > 0 ? (costs + forgone) / slice : Infinity, expSlice = hz * slice, expNet = expSlice - costs - forgone, expHr = expNet / hours;
+const verdict = expNet > 0 && expHr >= T.farm.worth_hour_floor ? 'Worth farming' : expNet > 0 || breakeven <= 2 * hz ? 'Marginal' : 'Skip';
+return { slice, costs, forgone, hours, breakeven, expSlice, expNet, expHr, verdict };
 }
 
 function aucScore(y, s) { const order = s.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v || a.i - b.i), r = new Array(s.length).fill(0); let i = 0; while (i < order.length) { let j = i; while (j + 1 < order.length && order[j + 1].v === order[i].v) j++; const avg = (i + 1 + j + 1) / 2; for (let t = i; t <= j; t++) r[order[t].i] = avg; i = j + 1; } let pos = 0, neg = 0, sumPos = 0; y.forEach((v, idx) => { if (v === 1) { pos++; sumPos += r[idx]; } else neg++; }); return pos && neg ? (sumPos - pos * (pos + 1) / 2) / (pos * neg) : 0; }
 function clockCV(rows) { const rng = mulberry(0xC10C), idx = rows.map((_, i) => i); for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = idx[i]; idx[i] = idx[j]; idx[j] = t; } const pred = new Array(rows.length).fill(0); for (let f = 0; f < 10; f++) { const test = new Set(idx.filter((_, i) => i % 10 === f)), beta = fitClock(rows.filter((_, i) => !test.has(i))); rows.forEach((r, i) => { if (test.has(i)) pred[i] = 1 / (1 + Math.exp(-r.x.reduce((s, v, j) => s + beta[j + 1] * v, beta[0]))); }); } const y = rows.map(r => r.y); return { auc: aucScore(y, pred), brier: y.reduce((s, v, i) => s + (v - pred[i]) ** 2, 0) / y.length }; }
 function evidence() {
-  const comps = T.raw.comps, kind = T.model.kind;
-  const vc = (dep) => { const o = { 'Worth farming': 0, Marginal: 0, Skip: 0 }; for (const r of T.rows) o[r.econ[String(dep)].verdict]++; return o; };
-  const crows = T.raw.clock.map(r => ({ x: clockFeats(r.tvl_usd, r.age_days ?? UNKNOWN_AGE, r.chains), y: r.launched }));
-  const sub = (keep) => crows.map(r => ({ x: keep.map(i => r.x[i]), y: r.y }));
-  const abl2 = [['size + age', [0, 1], true], ['size + age + chain count', [0, 1, 2], false], ['without size (age only)', [1], false], ['without age (size only)', [0], false]].map(([label, keep, adopted]) => ({ label, adopted, ...clockCV(sub(keep)) }));
-  abl2.push({ label: 'base rate only', adopted: false, auc: 0.5, brier: T.clock.base_brier });
-  const { res, calF, gq, bq } = looBands(comps, kind);
-  let mid = 0, wide = 0;
-  comps.forEach((p, i) => { const q = bq.get(Math.floor(Math.log10(p.tvl_usd))) ?? gq; if (res[i] >= q[1] && res[i] <= q[2]) mid++; if (res[i] >= q[0] && res[i] <= q[3]) wide++; });
-  const abl1 = Object.fromEntries(T.validation.ablation.map(a => [a.variant, a.medianMiss]));
-  const looCurve = abl1.curve;
-  const abl1ts = Object.fromEntries(T.validation.ablation.map(a => [a.variant, a.timeSplitMiss]));
-  const widths = T.rows.map(r => r.rank_range[1] - r.rank_range[0]);
-  return { vc10: vc(10000), vc1: vc(1000), abl2, gq, calF, covMid: mid / comps.length, covWide: wide / comps.length, tiltGap: abl1.growth - abl1.loggrowth, looCurve, tsGap: abl1ts.loggrowth, tsLinear: abl1ts.growth, tsCurve: abl1ts.curve, famLoo: abl1.family, famTs: abl1ts.family, medWidth: median(widths) };
+const comps = T.raw.comps, kind = T.model.kind;
+const vc = (dep) => { const o = { 'Worth farming': 0, Marginal: 0, Skip: 0 }; for (const r of T.rows) o[r.econ[String(dep)].verdict]++; return o; };
+const crows = T.raw.clock.map(r => ({ x: clockFeats(r.tvl_usd, r.age_days ?? UNKNOWN_AGE, r.chains), y: r.launched }));
+const sub = (keep) => crows.map(r => ({ x: keep.map(i => r.x[i]), y: r.y }));
+const abl2 = [['size + age', [0, 1], true], ['size + age + chain count', [0, 1, 2], false], ['without size (age only)', [1], false], ['without age (size only)', [0], false]].map(([label, keep, adopted]) => ({ label, adopted, ...clockCV(sub(keep)) }));
+abl2.push({ label: 'base rate only', adopted: false, auc: 0.5, brier: T.clock.base_brier });
+const { res, calF, gq, bq } = looBands(comps, kind);
+let mid = 0, wide = 0;
+comps.forEach((p, i) => { const q = bq.get(Math.floor(Math.log10(p.tvl_usd))) ?? gq; if (res[i] >= q[1] && res[i] <= q[2]) mid++; if (res[i] >= q[0] && res[i] <= q[3]) wide++; });
+const abl1 = Object.fromEntries(T.validation.ablation.map(a => [a.variant, a.medianMiss]));
+const looCurve = abl1.curve;
+const abl1ts = Object.fromEntries(T.validation.ablation.map(a => [a.variant, a.timeSplitMiss]));
+const widths = T.rows.map(r => r.rank_range[1] - r.rank_range[0]);
+return { vc10: vc(10000), vc1: vc(1000), abl2, gq, calF, covMid: mid / comps.length, covWide: wide / comps.length, tiltGap: abl1.growth - abl1.loggrowth, looCurve, tsGap: abl1ts.loggrowth, tsLinear: abl1ts.growth, tsCurve: abl1ts.curve, famLoo: abl1.family, famTs: abl1ts.family, medWidth: median(widths) };
 }
 let EV = null;
 function renderEvidence() {
-  const ev = EV, c = T.counts, v = T.validation, ck = T.clock;
-  const stat = (val, cap, sub, cls = '') => `<div class="stat"><div class="v ${cls}">${val}</div><div class="cap">${cap}</div><div class="sub">${sub}</div></div>`;
-  $('statStrip').innerHTML =
-    stat(c.protocols, 'protocols tracked', `${c.traded} trading · ${c.aside} aside · ${c.ranked} ranked`) +
-    stat(c.ranked, 'ranked pre-token', `${c.above_floor} above floor · ${c.watchlist} watch`) +
-    stat(ev.vc10['Worth farming'], 'worth farming at $10K', `of ${c.ranked} · only ${ev.vc1['Worth farming']} at $1K`, 'teal') +
-    stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat ×${v.flatMedianMiss.toFixed(2)} · ${v.comps} comps`, 'teal') +
-    stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds — actual', `nominal 50/80 · outer widened ×${ev.calF.toFixed(2)}`, 'teal') +
-    stat(ck.cv_auc.toFixed(3), 'AUC · out-of-sample', `${ck.population} · 10-fold · weak at timing`, 'amber') +
-    stat(ck.cv_brier.toFixed(3), 'Brier · out-of-sample', `base ${ck.base_brier.toFixed(3)} · edge thin`, 'amber');
-  const reasons = {}; for (const a of T.aside) reasons[a.reason] = (reasons[a.reason] ?? 0) + 1;
-  const seg = (n, cls, label) => `<span class="${cls}" style="width:${(n / c.protocols * 100).toFixed(2)}%" title="${label}: ${n}"></span>`;
-  $('funnelSegs').innerHTML = seg(c.traded, 'seg-traded', 'already record a token') + seg(c.aside, 'seg-aside', 'set aside by rule') + seg(c.ranked, 'seg-ranked', 'ranked pre-token');
-  $('funnelLine').innerHTML = `<b>${c.protocols}</b> in the snapshot → <b>${c.traded}</b> already record a token (the comps, never ranked) · <b>${c.aside}</b> set aside by rule · <b>${c.ranked}</b> ranked pre-token — <b>${c.traded} + ${c.aside} + ${c.ranked} = ${c.protocols}, all accounted for</b> · at $10K: <b>${ev.vc10['Worth farming']}</b> worth farming · <b>${ev.vc10.Marginal}</b> marginal · <b>${ev.vc10.Skip}</b> skip · at $1K: <b>${ev.vc1['Worth farming']}</b> worth farming`;
-  $('funnelNote').innerHTML = `Set aside: ${Object.entries(reasons).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}.`;
-  $('abl2Table').innerHTML = '<tr><th>Clock form</th><th>CV AUC</th><th>CV Brier</th></tr>' + ev.abl2.map(a => `<tr class="${a.adopted ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.auc.toFixed(3)}</td><td>${a.brier.toFixed(3)}</td></tr>`).join('');
-  $('abl2Note').innerHTML = `Same seeded 10 folds, refit here. The chain-count term was dropped this round: AUC ${ev.abl2[1].auc.toFixed(3)} against the adopted ${ck.cv_auc.toFixed(3)}.`;
-  $('critList').innerHTML = [
-    `The clock ranks better than it times: AUC <b>${ck.cv_auc.toFixed(3)}</b>, but its Brier edge over the base rate is only <b>${(ck.base_brier - ck.cv_brier).toFixed(3)}</b> (${ck.cv_brier.toFixed(3)} vs ${ck.base_brier.toFixed(3)}) — launch rates are frequencies, not dates.`,
-    `The growth tilt is the weakest kept term: log beats linear by <b>${ev.tiltGap.toFixed(2)}×</b> on LOO and <b>${(ev.tsLinear - ev.tsGap).toFixed(2)}×</b> on the time split (${ev.tsGap.toFixed(2)}× vs ${ev.tsLinear.toFixed(2)}×), but the no-tilt curve scores <b>${ev.tsCurve.toFixed(2)}×</b> on that split — the tilt stands on combined evidence (LOO ×${v.looMedianMiss.toFixed(2)} vs ×${ev.looCurve.toFixed(2)} without it).`,
-    `No sector term: shrunk category offsets scored <b>×${ev.famLoo.toFixed(2)}</b> LOO and <b>×${ev.famTs.toFixed(2)}</b> on the time split against the adopted ×${v.looMedianMiss.toFixed(2)} / ×${ev.tsGap.toFixed(2)} — so categories move a row only through TVL and growth.`,
-    `Verdicts are hostage to deposit size: <b>${ev.vc10['Worth farming']}</b> of ${c.ranked} plans are worth farming at $10K, only <b>${ev.vc1['Worth farming']}</b> at $1K. Gas and forgone yield, not the model, kill the small farms.`,
-    `Rank ranges stay wide for small protocols: the median range spans <b>${Math.round(ev.medWidth)}</b> places across the 200 bootstrap refits — read the board's tail as a group, not an order.`,
-    `One snapshot (${esc(T.as_of)}): TVL and 7-day change are single readings, and the clock's ages are tracking ages, not founding dates.`,
-  ].map(t => `<li>${t}</li>`).join('');
+const ev = EV, c = T.counts, v = T.validation, ck = T.clock;
+const stat = (val, cap, sub, cls = '') => `<div class="stat"><div class="v ${cls}">${val}</div><div class="cap">${cap}</div><div class="sub">${sub}</div></div>`;
+$('statStrip').innerHTML =
+stat(c.protocols, 'protocols tracked', `${c.traded} trading · ${c.aside} aside · ${c.ranked} ranked`) +
+stat(c.ranked, 'ranked pre-token', `${c.above_floor} above floor · ${c.watchlist} watch`) +
+stat(ev.vc10['Worth farming'], 'worth farming at $10K', `of ${c.ranked} · only ${ev.vc1['Worth farming']} at $1K`, 'teal') +
+stat('×' + v.looMedianMiss.toFixed(2), 'stage-1 LOO miss', `flat ×${v.flatMedianMiss.toFixed(2)} · ${v.comps} comps`, 'teal') +
+stat(Math.round(ev.covMid * 100) + '% · ' + Math.round(ev.covWide * 100) + '%', 'range holds — actual', `nominal 50/80 · outer widened ×${ev.calF.toFixed(2)}`, 'teal') +
+stat(ck.cv_auc.toFixed(3), 'AUC · out-of-sample', `${ck.population} · 10-fold · weak at timing`, 'amber') +
+stat(ck.cv_brier.toFixed(3), 'Brier · out-of-sample', `base ${ck.base_brier.toFixed(3)} · edge thin`, 'amber');
+const reasons = {}; for (const a of T.aside) reasons[a.reason] = (reasons[a.reason] ?? 0) + 1;
+const seg = (n, cls, label) => `<span class="${cls}" style="width:${(n / c.protocols * 100).toFixed(2)}%" title="${label}: ${n}"></span>`;
+$('funnelSegs').innerHTML = seg(c.traded, 'seg-traded', 'already record a token') + seg(c.aside, 'seg-aside', 'set aside by rule') + seg(c.ranked, 'seg-ranked', 'ranked pre-token');
+$('funnelLine').innerHTML = `<b>${c.protocols}</b> in the snapshot → <b>${c.traded}</b> already record a token (the comps, never ranked) · <b>${c.aside}</b> set aside by rule · <b>${c.ranked}</b> ranked pre-token — <b>${c.traded} + ${c.aside} + ${c.ranked} = ${c.protocols}, all accounted for</b> · at $10K: <b>${ev.vc10['Worth farming']}</b> worth farming · <b>${ev.vc10.Marginal}</b> marginal · <b>${ev.vc10.Skip}</b> skip · at $1K: <b>${ev.vc1['Worth farming']}</b> worth farming`;
+$('funnelNote').innerHTML = `Set aside: ${Object.entries(reasons).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}.`;
+const w3=[...T.rows].filter(r=>r.econ['10000'].verdict==='Worth farming').sort((a,b)=>b.econ['10000'].expected_net-a.econ['10000'].expected_net).slice(0,3);
+$('farmLine').textContent='Farm next at $10K — '+w3.map(r=>r.name+' +$'+Math.round(r.econ['10000'].expected_net)).join(' · ');
+const ad0=T.validation.ablation.find(a=>a.variant===T.model.kind);
+$('validLine').textContent='Validation — adopted '+ad0.label+' · LOO ×'+v.looMedianMiss.toFixed(2)+' · time-split ×'+ad0.timeSplitMiss.toFixed(2)+' · clock AUC '+ck.cv_auc.toFixed(3);
+$('abl2Table').innerHTML = '<tr><th>Clock form</th><th>CV AUC</th><th>CV Brier</th></tr>' + ev.abl2.map(a => `<tr class="${a.adopted ? 'adopted' : ''}"><td>${esc(a.label)}</td><td>${a.auc.toFixed(3)}</td><td>${a.brier.toFixed(3)}</td></tr>`).join('');
+$('abl2Note').innerHTML = `Same seeded 10 folds, refit here. The chain-count term was dropped this round: AUC ${ev.abl2[1].auc.toFixed(3)} against the adopted ${ck.cv_auc.toFixed(3)}.`;
+$('critList').innerHTML = [
+`The clock ranks better than it times: AUC <b>${ck.cv_auc.toFixed(3)}</b>, but its Brier edge over the base rate is only <b>${(ck.base_brier - ck.cv_brier).toFixed(3)}</b> (${ck.cv_brier.toFixed(3)} vs ${ck.base_brier.toFixed(3)}) — launch rates are frequencies, not dates.`,
+`The growth tilt is the weakest kept term: log beats linear by <b>${ev.tiltGap.toFixed(2)}×</b> on LOO and <b>${(ev.tsLinear - ev.tsGap).toFixed(2)}×</b> on the time split (${ev.tsGap.toFixed(2)}× vs ${ev.tsLinear.toFixed(2)}×), but the no-tilt curve scores <b>${ev.tsCurve.toFixed(2)}×</b> on that split — the tilt stands on combined evidence (LOO ×${v.looMedianMiss.toFixed(2)} vs ×${ev.looCurve.toFixed(2)} without it).`,
+`No sector term: shrunk category offsets scored <b>×${ev.famLoo.toFixed(2)}</b> LOO and <b>×${ev.famTs.toFixed(2)}</b> on the time split against the adopted ×${v.looMedianMiss.toFixed(2)} / ×${ev.tsGap.toFixed(2)} — so categories move a row only through TVL and growth.`,
+`Verdicts are hostage to deposit size: <b>${ev.vc10['Worth farming']}</b> of ${c.ranked} plans are worth farming at $10K, only <b>${ev.vc1['Worth farming']}</b> at $1K. Gas and forgone yield, not the model, kill the small farms.`,
+`Rank ranges stay wide for small protocols: the median range spans <b>${Math.round(ev.medWidth)}</b> places across the 200 bootstrap refits — read the board's tail as a group, not an order.`,
+`One snapshot (${esc(T.as_of)}): TVL and 7-day change are single readings, and the clock's ages are tracking ages, not founding dates.`,
+].map(t => `<li>${t}</li>`).join('');
 }
 
 function verify() {
-  const t0 = performance.now(), comps = T.raw.comps, rows = T.rows;
-  const kind = T.model.kind, fit = fitForm(comps, kind), model = { kind, a: fit.a, b: fit.b, g: fit.g, s: fit.s, family: fit.family };
-  const clockRows = T.raw.clock.map(r => ({ x: clockAdopted(r.tvl_usd, r.age_days ?? UNKNOWN_AGE), y: r.launched }));
-  const beta = fitClock(clockRows);
-  const { gq: globalQ, bq: bucketQ, calF: calF2 } = looBands(comps, kind);
-  const rng = mulberry(0x9E3779B9), rr = new Map();
-  for (let it = 0; it < 200; it++) { const sample = Array.from({ length: comps.length }, () => comps[Math.floor(rng() * comps.length)]), f3 = fitForm(sample, kind), mm = { kind, a: f3.a, b: f3.b, g: f3.g, s: f3.s, family: f3.family }; rows.map(p => ({ p, v: impliedOf(p, mm).value })).sort((x, y) => y.v - x.v || x.p.slug.localeCompare(y.p.slug)).forEach((x, i) => rr.set(x.p.slug, [...(rr.get(x.p.slug) ?? []), i + 1])); }
-  const nearRank = (v, q) => [...v].sort((a, b) => a - b)[Math.max(0, Math.ceil(q * v.length) - 1)] ?? 0;
-  let bad = '';
-  const vals = rows.map(p => ({ p, v: impliedOf(p, model).value }));
-  const rankOf = new Map([...vals].sort((x, y) => y.v - x.v || x.p.slug.localeCompare(y.p.slug)).map((x, i) => [x.p.slug, i + 1]));
-  for (const p of rows) {
-    const v = impliedOf(p, model).value;
-    if (v !== p.implied_value_usd) { bad = 'value: ' + p.slug; break; }
-    if (rankOf.get(p.slug) !== p.rank) { bad = 'rank: ' + p.slug; break; }
-    const key = Math.floor(Math.log10(p.tvl_usd)), q = bucketQ.get(key) ?? globalQ;
-    const band = q.map(x => Math.max(1, Math.round(v * 10 ** x))).sort((a, b) => a - b);
-    if (JSON.stringify(band) !== JSON.stringify(p.band)) { bad = 'band: ' + p.slug; break; }
-    const range = [nearRank(rr.get(p.slug) ?? [], .1), nearRank(rr.get(p.slug) ?? [], .9)];
-    if (JSON.stringify(range) !== JSON.stringify(p.rank_range)) { bad = 'rank range: ' + p.slug; break; }
-    const hz = hazard12(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
-    const f0 = clockF(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
-    if (Math.abs(f0 - p.clock.profile_match) > 2e-4) { bad = 'clock F: ' + p.slug; break; }
-    const mvd = minViable(p, v, p.age_days, hz);
-    if ((mvd === null) !== (p.min_viable_deposit_usd === null) || (mvd !== null && Math.abs(mvd - p.min_viable_deposit_usd) > 0.011)) { bad = 'min deposit: ' + p.slug; break; }
-    for (const dep of [1000, 10000]) { const e = farmEcon(p, v, p.age_days, dep, hz), s = p.econ[String(dep)];
-      if (e.verdict !== s.verdict || round2(e.expNet) !== s.expected_net || round2(e.expSlice) !== s.expected_slice || round2(e.slice) !== s.slice || round2(e.costs) !== s.costs || e.forgone !== s.forgone || Math.abs(e.hours - s.hours) > 1e-9 || round2(e.expHr) !== s.expected_net_hour || (s.breakeven === null ? isFinite(e.breakeven) : Math.abs(e.breakeven - s.breakeven) > 1e-4)) { bad = 'verdict: ' + p.slug; break; } }
-    if (bad) break;
-  }
-  const ev2 = evidence();
-  if (!bad && T.clock.beta.some((b, i) => Math.abs(b - beta[i]) > 1e-6)) bad = 'clock beta';
-  if (!bad && (Math.abs(ev2.abl2[0].auc - T.clock.cv_auc) > 5e-4 || Math.abs(ev2.abl2[0].brier - T.clock.cv_brier) > 5e-4)) bad = 'clock ablation';
-  if (!bad && JSON.stringify(ev2.gq.map(x => +x.toFixed(6))) !== JSON.stringify(T.band_table.global.map(x => +x.toFixed(6)))) bad = 'band table';
-  if (!bad && Math.abs(ev2.calF - T.band_table.calibration) > 1e-9) bad = 'band calibration';
-  if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
-  const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
-  if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
-  else { chip.textContent = `re-run OK — ${rows.length}/${rows.length} rows: ranks, values, bands, ranges, verdicts, totals, min deposits, funnel + ablations · ${secs}s`; chip.className = 'chip chip-ok'; }
+const t0 = performance.now(), comps = T.raw.comps, rows = T.rows;
+const kind = T.model.kind, fit = fitForm(comps, kind), model = { kind, a: fit.a, b: fit.b, g: fit.g, s: fit.s, family: fit.family };
+const clockRows = T.raw.clock.map(r => ({ x: clockAdopted(r.tvl_usd, r.age_days ?? UNKNOWN_AGE), y: r.launched }));
+const beta = fitClock(clockRows);
+const { gq: globalQ, bq: bucketQ, calF: calF2 } = looBands(comps, kind);
+const rng = mulberry(0x9E3779B9), rr = new Map();
+for (let it = 0; it < 200; it++) { const sample = Array.from({ length: comps.length }, () => comps[Math.floor(rng() * comps.length)]), f3 = fitForm(sample, kind), mm = { kind, a: f3.a, b: f3.b, g: f3.g, s: f3.s, family: f3.family }; rows.map(p => ({ p, v: impliedOf(p, mm).value })).sort((x, y) => y.v - x.v || x.p.slug.localeCompare(y.p.slug)).forEach((x, i) => rr.set(x.p.slug, [...(rr.get(x.p.slug) ?? []), i + 1])); }
+const nearRank = (v, q) => [...v].sort((a, b) => a - b)[Math.max(0, Math.ceil(q * v.length) - 1)] ?? 0;
+let bad = '';
+const vals = rows.map(p => ({ p, v: impliedOf(p, model).value }));
+const rankOf = new Map([...vals].sort((x, y) => y.v - x.v || x.p.slug.localeCompare(y.p.slug)).map((x, i) => [x.p.slug, i + 1]));
+for (const p of rows) {
+const v = impliedOf(p, model).value;
+if (v !== p.implied_value_usd) { bad = 'value: ' + p.slug; break; }
+if (rankOf.get(p.slug) !== p.rank) { bad = 'rank: ' + p.slug; break; }
+const key = Math.floor(Math.log10(p.tvl_usd)), q = bucketQ.get(key) ?? globalQ;
+const band = q.map(x => Math.max(1, Math.round(v * 10 ** x))).sort((a, b) => a - b);
+if (JSON.stringify(band) !== JSON.stringify(p.band)) { bad = 'band: ' + p.slug; break; }
+const range = [nearRank(rr.get(p.slug) ?? [], .1), nearRank(rr.get(p.slug) ?? [], .9)];
+if (JSON.stringify(range) !== JSON.stringify(p.rank_range)) { bad = 'rank range: ' + p.slug; break; }
+const hz = hazard12(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
+const f0 = clockF(beta, p.tvl_usd, p.age_days ?? UNKNOWN_AGE, p.chains.length);
+if (Math.abs(f0 - p.clock.profile_match) > 2e-4) { bad = 'clock F: ' + p.slug; break; }
+const mvd = minViable(p, v, p.age_days, hz);
+if ((mvd === null) !== (p.min_viable_deposit_usd === null) || (mvd !== null && Math.abs(mvd - p.min_viable_deposit_usd) > 0.011)) { bad = 'min deposit: ' + p.slug; break; }
+for (const dep of [1000, 10000]) { const e = farmEcon(p, v, p.age_days, dep, hz), s = p.econ[String(dep)];
+if (e.verdict !== s.verdict || round2(e.expNet) !== s.expected_net || round2(e.expSlice) !== s.expected_slice || round2(e.slice) !== s.slice || round2(e.costs) !== s.costs || e.forgone !== s.forgone || Math.abs(e.hours - s.hours) > 1e-9 || round2(e.expHr) !== s.expected_net_hour || (s.breakeven === null ? isFinite(e.breakeven) : Math.abs(e.breakeven - s.breakeven) > 1e-4)) { bad = 'verdict: ' + p.slug; break; } }
+if (bad) break;
+}
+const ev2 = evidence();
+if (!bad && T.clock.beta.some((b, i) => Math.abs(b - beta[i]) > 1e-6)) bad = 'clock beta';
+if (!bad && (Math.abs(ev2.abl2[0].auc - T.clock.cv_auc) > 5e-4 || Math.abs(ev2.abl2[0].brier - T.clock.cv_brier) > 5e-4)) bad = 'clock ablation';
+if (!bad && JSON.stringify(ev2.gq.map(x => +x.toFixed(6))) !== JSON.stringify(T.band_table.global.map(x => +x.toFixed(6)))) bad = 'band table';
+if (!bad && Math.abs(ev2.calF - T.band_table.calibration) > 1e-9) bad = 'band calibration';
+if (!bad && EV && JSON.stringify(ev2) !== JSON.stringify(EV)) bad = 'evidence render';
+if(!bad&&$('farmLine').textContent!=='Farm next at $10K — '+[...rows].filter(r=>r.econ['10000'].verdict==='Worth farming').sort((a,b)=>b.econ['10000'].expected_net-a.econ['10000'].expected_net).slice(0,3).map(r=>r.name+' +$'+Math.round(r.econ['10000'].expected_net)).join(' · '))bad='farm next';
+if(!bad){const ad9=T.validation.ablation.find(a=>a.variant===kind);if($('validLine').textContent!=='Validation — adopted '+ad9.label+' · LOO ×'+T.validation.looMedianMiss.toFixed(2)+' · time-split ×'+ad9.timeSplitMiss.toFixed(2)+' · clock AUC '+T.clock.cv_auc.toFixed(3))bad='validation line';}
+const secs = ((performance.now() - t0) / 1000).toFixed(1), chip = $('chip');
+if (bad) { chip.textContent = 're-run mismatch — ' + bad; chip.className = 'chip chip-bad'; }
+else { chip.textContent = `re-run OK — ${rows.length}/${rows.length} rows: ranks, values, bands, ranges, verdicts, totals, min deposits, funnel + ablations, farm next · ${secs}s`; chip.className = 'chip chip-ok'; }
 }
 
 const state = { q: '', seg: 'all', ver: 'all', fam: '', chain: '', dep: 10000, sort: 'rank', dir: 1 };
@@ -292,7 +298,7 @@ function renderDetail(slug) {
     <div class="d-head"><div><h1>${esc(r.name)}</h1><div class="sub">${esc(r.category ?? 'Uncategorised')} · ${esc(r.chains.slice(0, 3).join(', ') || 'no chain')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''} · TVL ${fmt$(r.tvl_usd)} · 7d ${r.change_7d === null ? '—' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(1) + '%'} · rank #${r.rank} (range ${r.rank_range[0]}–${r.rank_range[1]})${r.watchlist ? ' · on the watchlist' : ''}</div></div>
     <div class="d-big"><div><div class="cap">implied value if it launched at this record</div><div class="v">${fmt$(r.implied_value_usd)}</div></div><div><div class="cap">launch rate, next 12 months</div><div class="h">${Math.round(r.clock.hazard12 * 100)}% / yr</div></div></div></div>
     <div class="totals-h">The farm at the $10,000 size — totals</div><div class="totals" id="totalsStrip">
-      ${tile(fmt$(e10.slice), 'Slice if launch')}${tile(fmt$(e10.expected_slice), 'Expected slice', `${Math.round(r.clock.hazard12 * 100)}% launch rate`)}${tile(fmt$(e10.costs), 'Fees and gas')}${tile(fmt$(e10.forgone), 'Yield forgone')}${tile(e10.hours.toFixed(1) + 'h', 'Your time', `over ${e10.weeks} weeks`)}${tile(signed$(e10.expected_net), 'Expected net', signed$(e10.expected_net_hour) + '/h', e10.expected_net >= 0 ? 'pos' : 'neg')}${tile(e10.breakeven === null || !isFinite(e10.breakeven) ? '—' : Math.round(e10.breakeven * 100) + '%', 'Break-even launch rate')}${tile(esc(e10.verdict), 'Verdict', '', vClass(e10.verdict))}
+      ${tile(fmt$(e10.slice), 'Slice if launch')}${tile(fmt$(e10.expected_slice), 'Expected slice', `${Math.round(r.clock.hazard12 * 100)}% launch rate`)}${tile('$' + fmtN(e10.costs), 'Fees and gas')}${tile(fmt$(e10.forgone), 'Yield forgone')}${tile(e10.hours.toFixed(1) + 'h', 'Your time', `over ${e10.weeks} weeks`)}${tile(signed$(e10.expected_net), 'Expected net', signed$(e10.expected_net_hour) + '/h', e10.expected_net >= 0 ? 'pos' : 'neg')}${tile(e10.breakeven === null || !isFinite(e10.breakeven) ? '—' : Math.round(e10.breakeven * 100) + '%', 'Break-even launch rate')}${tile(esc(e10.verdict), 'Verdict', '', vClass(e10.verdict))}
     </div>
     <div class="mindep" id="mindep">${mvdText}</div>
     <div class="totals-h">How the two headline numbers are built</div><div class="buildup" id="buildup">
@@ -300,14 +306,14 @@ function renderDetail(slug) {
       <div class="bu-row"><span class="bu-cap">Stage 2 — clock</span>drivers, logit points: size <b>${contrib(beta[1] * bx[0])}</b> · age <b>${contrib(beta[2] * bx[1])}</b> · base <b>${contrib(beta[0])}</b> → logit <b>${contrib(bZ)}</b> → F(today) <b>${pct2(bF0)}</b> → F(+1y) <b>${pct2(bF1)}</b> → <b>launch rate (${pct2(bF1)} − ${pct2(bF0)}) / (1 − ${pct2(bF0)}) = ${(bHz * 100).toFixed(1)}% / yr</b></div>
       <div class="bu-row"><span class="bu-cap">Snapshot record</span>listed <b>${esc(r.listed_at ?? 'null')}</b> · tracked <b>${r.age_days === null ? '—' : r.age_days + 'd'}</b> · chains <b>${esc(r.chains.slice(0, 3).join(', ') || 'none listed')}${r.chains.length > 3 ? ` +${r.chains.length - 3} more` : ''}</b> · status: <b>no token recorded</b> (gecko_id and symbol both null)</div>
     </div>
+    <div class="panel" id="compsPanel" style="margin-bottom:8px"><h2>Nearest traded comparables — by TVL</h2><table class="data"><tr><th>Protocol</th><th>TVL</th><th>Market cap</th><th>Curve says</th><th>Actual / curve</th></tr>
+      ${r.comps_near.map(c => `<tr><td>${esc(c.name)}${c.symbol ? ' (' + esc(c.symbol) + ')' : ''}</td><td>${fmt$(c.tvl_usd)}</td><td>${fmt$(c.mcap_usd)}</td><td>${fmt$(c.curve_value_usd)}</td><td>${c.ratio.toFixed(2)}x</td></tr>`).join('')}</table></div>
     <div class="panel plan-panel"><h2>The plan — ${r.steps.length} steps, ${r.econ['10000'].weeks} weeks at $10,000</h2><ol class="steps">
       ${r.steps.map(s => `<li><span class="when">${esc(s.when)}</span><span class="txt">${esc(s.text)}</span><span class="ct">${esc(s.cost)}<br>${esc(s.time)}</span></li>`).join('')}</ol></div>
     <div class="d-grid">
       <div class="panel"><h2>The value build</h2><div class="factors">
         ${factor('TVL', fmt$(r.tvl_usd))}<span class="factor-arrow">→</span>${factor('Size curve', fmt$(f.curve_value_usd))}<span class="factor-arrow">×</span>${factor('Growth tilt', f.growth_multiplier.toFixed(2) + 'x')}${f.family_multiplier !== 1 ? `<span class="factor-arrow">×</span>${factor('Category', f.family_multiplier.toFixed(2) + 'x')}` : ''}${f.season_multiplier !== 1 ? `<span class="factor-arrow">×</span>${factor('Seasoning', f.season_multiplier.toFixed(2) + 'x')}` : ''}<span class="factor-arrow">=</span>${factor('Implied value', fmt$(r.implied_value_usd))}
-      </div><p class="stats">Band from leave-one-out residuals at this TVL decade, outer pair widened ×${T.band_table.calibration.toFixed(2)} for calibration: headline P25 <b>${fmt$(band[1])}</b> · P75 <b>${fmt$(band[2])}</b> · outer P10 <b>${fmt$(band[0])}</b> · P90 <b>${fmt$(band[3])}</b>. Half the traded comps land within ${T.validation.looMedianMiss.toFixed(1)}x of their fitted value.</p>
-      <h2 style="margin-top:24px">Nearest traded comparables — by TVL</h2><table class="data"><tr><th>Protocol</th><th>TVL</th><th>Market cap</th><th>Curve says</th><th>Actual / curve</th></tr>
-      ${r.comps_near.map(c => `<tr><td>${esc(c.name)}${c.symbol ? ' (' + esc(c.symbol) + ')' : ''}</td><td>${fmt$(c.tvl_usd)}</td><td>${fmt$(c.mcap_usd)}</td><td>${fmt$(c.curve_value_usd)}</td><td>${c.ratio.toFixed(2)}x</td></tr>`).join('')}</table></div>
+      </div><p class="stats">Band from leave-one-out residuals at this TVL decade, outer pair widened ×${T.band_table.calibration.toFixed(2)} for calibration: headline P25 <b>${fmt$(band[1])}</b> · P75 <b>${fmt$(band[2])}</b> · outer P10 <b>${fmt$(band[0])}</b> · P90 <b>${fmt$(band[3])}</b>. Half the traded comps land within ${T.validation.looMedianMiss.toFixed(1)}x of their fitted value.</p></div>
       <div class="panel"><h2>The countdown</h2><div class="clockread">
         <div class="cr"><div class="val">${r.age_days === null ? '—' : (r.age_days / 365).toFixed(1) + 'y'}</div><div class="cap">tracked with no token</div></div>
         <div class="cr"><div class="val">${Math.round(r.clock.profile_match * 100)}%</div><div class="cap">of lookalikes have launched by this age</div></div>
